@@ -1,0 +1,35 @@
+.git
+.gitignore
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+**/.venv/
+**/venv/
+**/.pip_packages/
+**/.env
+**/.env.*
+!**/.env.example
+**/data/
+**/*.sqlite3
+**/*.sqlite3-*
+terminals/
+.cursor/
+*.md
+!mobilecontacts/python/.env.example
+
+# Large dev/build artifacts — not needed in Cloud Run container builds
+vendor/wheels/
+vendor/python/
+dist/
+imports/
+logs/
+uploads/
+runtime/
+tests/
+**/.DS_Store
+**/node_modules/
+
+# Separate deployables (mobile/share Dockerfiles copy only what they need)
+sharecontactsfree/
+mobilecontacts/python/data/
