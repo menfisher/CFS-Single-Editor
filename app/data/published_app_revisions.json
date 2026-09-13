@@ -2,8 +2,13 @@
   "format": "contactsfreeshare.published_revisions.v1",
   "revisions": [
     {
-      "version": "1.3",
+      "version": "1.221",
+      "date_display": "9/13/2026",
+      "description": "Leftover-contact cleanup, long-address wrap, cover-picture persist, and paper-book left-flush margins."
+    },
+    {
       "date_display": "7/30/2026",
+      "version": "1.3",
       "description": "CFS Single Editor baseline. Separate update feed from the multi-editor ContactsFreeShare app."
     }
   ]
