@@ -240,6 +240,9 @@ def restore_contacts_backup_payload(payload: dict, *, restore_files: bool = True
             table_name: _insert_rows(conn, table_name, tables.get(table_name) or [])
             for table_name in CONTACT_RESTORE_INSERT_ORDER
         }
+        from app.services.google_sync_service import collapse_stale_identity_duplicate_contacts
+
+        stale_duplicate_ids = collapse_stale_identity_duplicate_contacts(conn)
         conn.execute(
             """
             UPDATE google_sync_state
@@ -248,10 +251,15 @@ def restore_contacts_backup_payload(payload: dict, *, restore_files: bool = True
               needs_upload_reminder = 0,
               needs_drive_export = 0,
               meetingdata_needs_drive_export = 0,
+              contacts_manifest_needs_drive_export = CASE
+                WHEN ? THEN 1
+                ELSE contacts_manifest_needs_drive_export
+              END,
               last_sync_error = '',
               updated_at = CURRENT_TIMESTAMP
             WHERE id = 1
-            """
+            """,
+            (1 if stale_duplicate_ids else 0,),
         )
         conn.commit()
     return inserted_counts

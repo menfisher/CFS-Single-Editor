@@ -1103,13 +1103,26 @@ def _field_list_display_address(address: dict[str, Any], include_home_label: boo
     return formatted
 
 
+def _field_list_address_column_width_pt(settings: dict[str, Any]) -> float:
+    """Width available for name/address text after the fixed phone column."""
+    from app.services.address_book_pdf_service import _text_width
+
+    font_size = float(settings.get("base_font_size_pt") or 10.0)
+    font_family = str(settings.get("font_family") or "Arial")
+    column_pt = float(settings.get("column_width_in") or 4.0) * 72.0
+    # Match CSS/JS: fixed 16ch phone stack + 1ch gap.
+    phone_pt = _text_width("0" * 16, font_size, font_family)
+    gap_pt = _text_width("0", font_size, font_family)
+    return max(72.0, column_pt - phone_pt - gap_pt)
+
+
 def _field_list_address_display_lines(
     addresses: list[Any],
     *,
     max_width: float | None = None,
     text_width=None,
 ) -> list[str]:
-    """Prefer one address line; wrap between street and city when too wide."""
+    """Prefer one address line; wrap street/city (and long streets at commas) to width."""
     lines: list[str] = []
     for item in addresses or []:
         if isinstance(item, dict):
@@ -2974,7 +2987,17 @@ def _field_list_print_contact_html(contact: dict[str, Any], settings: dict[str, 
         for index, phone in enumerate(raw_phones):
             phone_lines.append(_field_list_print_phone_line_html(phone, index))
     phone_lines = [line for line in phone_lines if line]
-    address_lines = _field_list_address_display_lines(contact.get("address_entries") or contact.get("addresses", []))
+    from app.services.address_book_pdf_service import _text_width as _pdf_text_width
+
+    address_font_size = float(settings.get("base_font_size_pt") or 10.0)
+    address_font_family = str(settings.get("font_family") or "Arial")
+    address_lines = _field_list_address_display_lines(
+        contact.get("address_entries") or contact.get("addresses", []),
+        max_width=_field_list_address_column_width_pt(settings),
+        text_width=lambda value, size=address_font_size, family=address_font_family: _pdf_text_width(
+            value, size, family
+        ),
+    )
     compact_address_lines = [
         ", ".join(line.strip() for line in str(item or "").splitlines() if line.strip())
         for item in contact.get("addresses", [])

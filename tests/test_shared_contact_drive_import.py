@@ -390,6 +390,31 @@ class SharedContactDriveImportTests(unittest.TestCase):
         self.assertEqual(phone, "555-3333")
         self.assertEqual(int(revision), 3)
 
+    def test_merge_remaps_new_google_id_onto_same_name_and_phone(self) -> None:
+        self.conn.execute(
+            "UPDATE contacts SET google_contact_id = 'people/c-old' WHERE id = 1"
+        )
+        self.conn.commit()
+        remote_payload = self._remote_payload(revision=4, phone_number="555-1111")
+        remote_payload["contact"]["id"] = 50
+        remote_payload["contact"]["google_contact_id"] = "people/c-new"
+        remote_payload["phones"][0]["contact_id"] = 50
+        remote_payload["contact_edit_log_entries"][0]["contact_id"] = 50
+
+        merged_id = _merge_shared_contact_record_from_drive(self.conn, remote_payload)
+        self.conn.commit()
+
+        rows = [
+            dict(row)
+            for row in self.conn.execute(
+                "SELECT id, google_contact_id FROM contacts ORDER BY id"
+            ).fetchall()
+        ]
+        self.assertEqual(merged_id, 1)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["id"], 1)
+        self.assertEqual(rows[0]["google_contact_id"], "people/c-new")
+
 
 if __name__ == "__main__":
     unittest.main()

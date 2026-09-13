@@ -458,6 +458,61 @@ function splitAddressBookPdfStreetAndCity(address) {
   return { street1: street, street2: "", city };
 }
 
+function addressBookPdfIsUnitOrAptPart(part) {
+  return /^(?:#\S+|(?:apt|apartment|suite|ste|unit)\b.*)$/i.test(String(part || "").trim());
+}
+
+function addressBookPdfWrapAddressWords(text, maxWidthPx, fontSizePx = 10, fontFamily = "Arial") {
+  const value = String(text || "").trim();
+  if (!value) return [];
+  const fits = (line) => measureAddressBookPdfTextWidth(line, fontSizePx, fontFamily) <= maxWidthPx;
+  if (fits(value)) return [value];
+  const words = value.split(/\s+/).filter(Boolean);
+  if (words.length <= 1) return [value];
+  const lines = [];
+  let current = words[0];
+  words.slice(1).forEach((word) => {
+    const candidate = `${current} ${word}`;
+    if (fits(candidate)) current = candidate;
+    else {
+      lines.push(current);
+      current = word;
+    }
+  });
+  if (current) lines.push(current);
+  return lines;
+}
+
+function addressBookPdfWrapAddressText(text, maxWidthPx, fontSizePx = 10, fontFamily = "Arial") {
+  const value = String(text || "").trim();
+  if (!value) return [];
+  const fits = (line) => measureAddressBookPdfTextWidth(line, fontSizePx, fontFamily) <= maxWidthPx;
+  if (fits(value)) return [value];
+
+  const parts = value.split(",").map((part) => part.trim()).filter(Boolean);
+  if (parts.length > 1) {
+    const lines = [];
+    let current = parts[0];
+    parts.slice(1).forEach((part) => {
+      const candidate = `${current}, ${part}`;
+      if (fits(candidate) || addressBookPdfIsUnitOrAptPart(part)) {
+        current = candidate;
+      } else {
+        lines.push(`${current},`);
+        current = part;
+      }
+    });
+    if (current) lines.push(current);
+    return lines.flatMap((line) => (
+      fits(line)
+        ? [line]
+        : addressBookPdfWrapAddressWords(line.replace(/,$/, "").trim(), maxWidthPx, fontSizePx, fontFamily)
+    ));
+  }
+
+  return addressBookPdfWrapAddressWords(value, maxWidthPx, fontSizePx, fontFamily);
+}
+
 function addressBookPdfAddressDisplayLines(address, maxWidthPx = null, fontSizePx = 10, fontFamily = "Arial") {
   const entry = (address && typeof address === "object") ? address : { text: address };
   const text = String(entry.text || address || "").trim();
@@ -485,21 +540,20 @@ function addressBookPdfAddressDisplayLines(address, maxWidthPx = null, fontSizeP
     if (!city) city = parsed.city;
   }
 
-  if (street1 && street2) {
-    if (city) {
-      const combined = `${street2}, ${city}`;
-      const canMeasure = maxWidthPx != null && maxWidthPx > 0;
-      if (!canMeasure || measureAddressBookPdfTextWidth(combined, fontSizePx, fontFamily) <= maxWidthPx) {
-        return [street1, combined];
-      }
-      return [street1, street2, city];
-    }
-    return [street1, street2];
-  }
-
-  const street = street1 || street2;
-  if (!street || !city) {
+  const streetParts = [street1, ...street2.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)].filter(Boolean);
+  const street = streetParts.join(", ");
+  if (!street && !city) {
     return text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  }
+  if (!street) {
+    return (maxWidthPx != null && maxWidthPx > 0)
+      ? addressBookPdfWrapAddressText(city, maxWidthPx, fontSizePx, fontFamily)
+      : [city];
+  }
+  if (!city) {
+    return (maxWidthPx != null && maxWidthPx > 0)
+      ? addressBookPdfWrapAddressText(street, maxWidthPx, fontSizePx, fontFamily)
+      : [street];
   }
   const oneLine = `${street}, ${city}`;
   if (maxWidthPx == null || !(maxWidthPx > 0)) {
@@ -508,7 +562,17 @@ function addressBookPdfAddressDisplayLines(address, maxWidthPx = null, fontSizeP
   if (measureAddressBookPdfTextWidth(oneLine, fontSizePx, fontFamily) <= maxWidthPx) {
     return [oneLine];
   }
-  return [street, city];
+  if (measureAddressBookPdfTextWidth(street, fontSizePx, fontFamily) <= maxWidthPx) {
+    return [street, city];
+  }
+  const streetLines = addressBookPdfWrapAddressText(street, maxWidthPx, fontSizePx, fontFamily);
+  if (streetLines.length) {
+    const combined = `${streetLines[streetLines.length - 1]}, ${city}`;
+    if (measureAddressBookPdfTextWidth(combined, fontSizePx, fontFamily) <= maxWidthPx) {
+      return [...streetLines.slice(0, -1), combined];
+    }
+  }
+  return [...streetLines, city];
 }
 
 function addressBookPdfAddressEntry(address) {
@@ -1648,6 +1712,7 @@ function installAddressBookPdfCoverModal(form) {
   if (!modal || !openButton || !fileInput || !zoomInput || !preview || !applyButton || !clearButton || !cancelButton || !includeCheckbox || !includeValue || !includeTitleCheckbox || !includeTitleValue || !includeDateCheckbox || !includeDateValue || !titleInput || !titleSizeInput || !titleColorInput || !titleTextInput || !titleFontSizeInput || !titleColorHiddenInput || !titleEffectHiddenInput || !titleXInput || !titleYInput || !titlePreviewWidthInput || !dateInput || !dateSizeInput || !dateColorInput || !dateTextInput || !dateFontSizeInput || !dateColorHiddenInput || !dateXInput || !dateYInput || !titleControls || !dateFields || !savedSelect || !saveCoverButton || !deleteCoverButton || !dataInput || !widthInput || !heightInput || !labelInput || !summaryEl) return;
 
   const savedCoverStorageKey = "addressBookPdfSavedCovers";
+  const lastCoverStorageKey = "addressBookPdfLastCoverPicture";
   let pendingCover = null;
   let sourceCover = null;
   let cropState = { x: 0.5, y: 0.5, zoom: 1 };
@@ -1674,8 +1739,20 @@ function installAddressBookPdfCoverModal(form) {
       return;
     }
     const label = String(labelInput.value || "").trim() || "Selected picture";
-    summaryEl.textContent = `${label} — Cover picture will be used on the cover page.`;
+    summaryEl.textContent = `${label} — Cover picture for the Address Book.`;
     summaryEl.hidden = false;
+  };
+
+  const readLastCover = () => {
+    try {
+      return JSON.parse(window.localStorage.getItem(lastCoverStorageKey) || "null");
+    } catch {
+      return null;
+    }
+  };
+
+  const writeLastCover = (payload) => {
+    window.localStorage.setItem(lastCoverStorageKey, JSON.stringify(payload));
   };
 
   const syncCoverChoiceVisibility = () => {
@@ -1685,6 +1762,9 @@ function installAddressBookPdfCoverModal(form) {
     if (!wantsCover) {
       includeDateCheckbox.checked = false;
       includeDateValue.value = "0";
+      summaryEl.hidden = true;
+    } else if (dataInput.value) {
+      summaryEl.hidden = false;
     }
     updateCoverSummary();
   };
@@ -1947,6 +2027,7 @@ function installAddressBookPdfCoverModal(form) {
       data: canvas.toDataURL("image/jpeg", 0.9),
       width,
       height,
+      label: sourceCover?.label || pendingCover?.label || labelInput.value || "Picture",
     };
   };
 
@@ -1958,8 +2039,8 @@ function installAddressBookPdfCoverModal(form) {
       labelInput.value = "";
     } else if (label) {
       labelInput.value = String(label).trim();
-    } else if (!labelInput.value) {
-      labelInput.value = "Selected picture";
+    } else {
+      labelInput.value = cover?.label || labelInput.value || "Selected picture";
     }
     includeCheckbox.checked = Boolean(cover?.data);
     includeValue.value = cover?.data ? "1" : "0";
@@ -1968,11 +2049,27 @@ function installAddressBookPdfCoverModal(form) {
     syncTitleHiddenInputs();
     syncDateHiddenInputs();
     updateAddressBookPdfCoverCanvas();
+    updateCoverSummary();
+    if (cover?.data) {
+      try {
+        writeLastCover({
+          data: cover.data,
+          width: cover.width || "",
+          height: cover.height || "",
+          label: cover.label || labelInput.value || "Picture",
+        });
+      } catch {
+        // Ignore storage quota errors; the in-page selection still remains.
+      }
+    } else {
+      window.localStorage.removeItem(lastCoverStorageKey);
+    }
   };
 
   const currentSavedCoverPayload = () => {
     const cover = sourceToCover();
     if (!cover?.data) return null;
+    cover.label = sourceCover?.label || cover.label || labelInput.value || "Picture";
     return {
       cover,
       title: {
@@ -1997,14 +2094,17 @@ function installAddressBookPdfCoverModal(form) {
 
   const applySavedCoverPayload = (payload) => {
     if (!payload?.cover?.data) return;
+    const coverLabel = payload.cover.label || savedSelect.value || "Saved cover";
     pendingCover = {
       data: payload.cover.data,
       width: payload.cover.width,
       height: payload.cover.height,
+      label: coverLabel,
     };
     dataInput.value = pendingCover.data;
     widthInput.value = pendingCover.width ? String(pendingCover.width) : "";
     heightInput.value = pendingCover.height ? String(pendingCover.height) : "";
+    labelInput.value = coverLabel;
     includeCheckbox.checked = true;
     includeValue.value = "1";
     includeTitleCheckbox.checked = Boolean(payload.title?.enabled);
@@ -2030,18 +2130,24 @@ function installAddressBookPdfCoverModal(form) {
       x: parseFloat(payload.date?.x || "0.5") || 0.5,
       y: parseFloat(payload.date?.y || "0.82") || 0.82,
     };
-    sourceCover = {
-      src: pendingCover.data,
-      image: null,
-      label: String(savedSelect.value || labelInput.value || "Saved cover").trim() || "Saved cover",
-    };
-    labelInput.value = sourceCover.label;
+    sourceCover = { src: pendingCover.data, image: null, label: coverLabel };
     cropState = { x: 0.5, y: 0.5, zoom: 1 };
     syncCoverChoiceVisibility();
     syncCoverTextAccess();
     syncTitleHiddenInputs();
     syncDateHiddenInputs();
     updateAddressBookPdfCoverCanvas();
+    updateCoverSummary();
+    try {
+      writeLastCover({
+        data: pendingCover.data,
+        width: pendingCover.width || "",
+        height: pendingCover.height || "",
+        label: coverLabel,
+      });
+    } catch {
+      // Ignore storage quota errors.
+    }
     const image = new Image();
     image.onload = () => {
       sourceCover.image = image;
@@ -2051,6 +2157,7 @@ function installAddressBookPdfCoverModal(form) {
       syncCoverChoiceVisibility();
       syncCoverTextAccess();
       updateAddressBookPdfCoverCanvas();
+      updateCoverSummary();
     };
     image.src = sourceCover.src;
   };
@@ -2270,9 +2377,14 @@ function installAddressBookPdfCoverModal(form) {
   if (!dateInput.value) dateInput.value = todayDateText();
   syncDateHiddenInputs();
   renderSavedCovers();
-  syncCoverChoiceVisibility();
+  const lastCover = readLastCover();
+  if (lastCover?.data) {
+    setStoredCover(lastCover);
+  } else {
+    syncCoverChoiceVisibility();
+    updateCoverSummary();
+  }
   syncCoverTextAccess();
-  updateCoverSummary();
   clearButton.addEventListener("click", () => {
     pendingCover = null;
     sourceCover = null;

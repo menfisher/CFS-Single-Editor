@@ -206,6 +206,78 @@ def split_address_street_and_city(value: str) -> tuple[str, str]:
     return text, ""
 
 
+_UNIT_OR_APT_PART_RE = re.compile(
+    r"^(?:#\S+|(?:apt|apartment|suite|ste|unit)\b.*)$",
+    re.IGNORECASE,
+)
+
+
+def _is_unit_or_apt_part(part: str) -> bool:
+    return bool(_UNIT_OR_APT_PART_RE.match(_clean(part)))
+
+
+def _wrap_address_words(text: str, *, fits) -> list[str]:
+    value = _clean(text)
+    if not value:
+        return []
+    if fits(value):
+        return [value]
+    words = value.split()
+    if len(words) <= 1:
+        return [value]
+    lines: list[str] = []
+    current = words[0]
+    for word in words[1:]:
+        candidate = f"{current} {word}"
+        if fits(candidate):
+            current = candidate
+        else:
+            lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _wrap_address_text_to_width(
+    text: str,
+    *,
+    fits,
+) -> list[str]:
+    """Wrap a long address segment, preferring commas, then spaces."""
+    value = _clean(text)
+    if not value:
+        return []
+    if fits(value):
+        return [value]
+
+    parts = [part.strip() for part in value.split(",") if part.strip()]
+    if len(parts) > 1:
+        lines: list[str] = []
+        current = parts[0]
+        for part in parts[1:]:
+            candidate = f"{current}, {part}"
+            # Keep short unit/apt tokens with the street line when possible.
+            if fits(candidate) or _is_unit_or_apt_part(part):
+                current = candidate
+            else:
+                # Keep the comma on the finished line so the break is obvious.
+                lines.append(f"{current},")
+                current = part
+        if current:
+            lines.append(current)
+        wrapped: list[str] = []
+        for line in lines:
+            if fits(line):
+                wrapped.append(line)
+            else:
+                # Word-wrap only — do not re-enter comma logic (sticky units).
+                wrapped.extend(_wrap_address_words(line.rstrip(",").strip(), fits=fits) or [line])
+        return wrapped
+
+    return _wrap_address_words(value, fits=fits)
+
+
 def address_display_lines(
     value: str = "",
     *,
@@ -219,9 +291,10 @@ def address_display_lines(
 ) -> list[str]:
     """Print lines for address book / field list.
 
-    - Street 1 and street 2 stay on separate lines when both exist.
-    - City/state/ZIP joins the last street line when it fits; otherwise its own line.
-    - Single-street addresses prefer one line; wrap to street / city when too wide.
+    Prefer one line: street, unit/apt, city, state ZIP.
+    If that is too wide, keep street + unit together when possible and put
+    city/state/ZIP on the next line. Long street blocks wrap at commas so
+    lines stay inside the name/address column (never under the phone gap).
     """
     def _fits(line: str) -> bool:
         if max_width is None or text_width is None:
@@ -242,36 +315,26 @@ def address_display_lines(
     street1 = _clean(enriched["street_address"])
     street2 = _clean(str(enriched["extended_address"] or "").replace("\r", "\n"))
     street2_parts = [part.strip() for part in street2.split("\n") if part.strip()]
+    street_block = ", ".join(part for part in [street1, *street2_parts] if part)
     city_line = build_city_line(enriched["city"], enriched["region"], enriched["postal_code"])
 
-    if street1 and street2_parts:
-        prior = [street1, *street2_parts[:-1]]
-        last_street = street2_parts[-1]
-        if city_line:
-            combined = f"{last_street}, {city_line}"
-            if _fits(combined):
-                return [*prior, combined]
-            return [*prior, last_street, city_line]
-        return [street1, *street2_parts]
-
-    street_block = street1 or (street2_parts[0] if street2_parts else "")
-    if len(street2_parts) > 1:
-        prior = [street_block, *street2_parts[1:-1]]
-        last_street = street2_parts[-1]
-        if city_line:
-            combined = f"{last_street}, {city_line}"
-            if _fits(combined):
-                return [part for part in [*prior, combined] if part]
-            return [part for part in [*prior, last_street, city_line] if part]
-        return [part for part in [street_block, *street2_parts[1:]] if part]
-
-    one_line = enriched["formatted_address"] or ", ".join(
-        part for part in (street_block, city_line) if part
-    )
-    if not one_line:
+    if not street_block and not city_line:
         return []
-    if not street_block or not city_line:
-        return [one_line]
+    if not street_block:
+        return _wrap_address_text_to_width(city_line, fits=_fits)
+    if not city_line:
+        return _wrap_address_text_to_width(street_block, fits=_fits)
+
+    one_line = f"{street_block}, {city_line}"
     if _fits(one_line):
         return [one_line]
-    return [street_block, city_line]
+
+    if _fits(street_block):
+        return [street_block, city_line]
+
+    street_lines = _wrap_address_text_to_width(street_block, fits=_fits)
+    if street_lines:
+        combined = f"{street_lines[-1]}, {city_line}"
+        if _fits(combined):
+            return [*street_lines[:-1], combined]
+    return [*street_lines, city_line]

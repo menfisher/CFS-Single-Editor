@@ -27,15 +27,45 @@
   <script>
     (() => {
       const printButton = document.getElementById("address-book-pdf-print-button");
-      const frame = document.querySelector(".address-book-pdf-viewer-frame");
-      printButton?.addEventListener("click", () => {
-        try {
-          frame?.contentWindow?.focus();
-          frame?.contentWindow?.print();
-        } catch (_error) {
-          window.open(`/address-book/pdf/file/{{ filename }}?v={{ pdf_cache_bust }}`, "_blank", "noopener");
+      // Print the real PDF document (vector), not the preview iframe and not a
+      // rasterized html canvas. Iframe printing often "fits" and clips ~0.25";
+      // canvas printing keeps scale but destroys sharpness.
+      const pdfUrl = "/address-book/pdf/file/{{ filename }}?v={{ pdf_cache_bust }}";
+      const openPrintDialog = () => {
+        // Do not use noopener — it makes window.open() return null, so we used
+        // to navigate to the raw PDF with no print dialog.
+        const printWindow = window.open(pdfUrl, "_blank");
+        if (!printWindow) {
+          window.alert(
+            "Allow pop-ups for this site, then click Print again.\n\nOr open the PDF and press Ctrl+P (Cmd+P on Mac)."
+          );
+          return;
         }
-      });
+        let tries = 0;
+        const tryPrint = () => {
+          tries += 1;
+          try {
+            printWindow.focus();
+            printWindow.print();
+          } catch (_error) {
+            // PDF viewers finish loading after open; keep retrying briefly.
+          }
+          if (tries < 6) {
+            window.setTimeout(tryPrint, 500);
+          }
+        };
+        window.setTimeout(tryPrint, 400);
+        try {
+          printWindow.addEventListener("load", () => window.setTimeout(tryPrint, 200));
+        } catch (_error) {
+          // Some browsers block listeners on PDF tabs; timeouts still run.
+        }
+      };
+      printButton?.addEventListener("click", openPrintDialog);
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("autoprint") === "1") {
+        window.setTimeout(openPrintDialog, 300);
+      }
     })();
   </script>
 {% endblock %}

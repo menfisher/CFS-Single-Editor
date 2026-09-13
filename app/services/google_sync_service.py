@@ -4784,6 +4784,187 @@ def _collapse_contacts_sharing_google_id(conn, google_contact_id: str, keep_cont
         _delete_local_contact_record(conn, int(row["id"]))
 
 
+def _normalize_phone_identity_key(value: object) -> str:
+    digits = "".join(character for character in _clean(value) if character.isdigit())
+    if len(digits) >= 10:
+        return digits[-10:]
+    return digits if len(digits) >= 7 else ""
+
+
+def _normalize_email_identity_key(value: object) -> str:
+    return _clean(value).casefold()
+
+
+def _contact_name_identity_key(given_name: object, family_name: object) -> tuple[str, str]:
+    return (_clean(given_name).casefold(), _clean(family_name).casefold())
+
+
+def _phone_identity_keys(values) -> set[str]:
+    keys: set[str] = set()
+    for value in values or []:
+        if isinstance(value, dict):
+            value = value.get("phone_value") or value.get("phone_number") or value.get("value")
+        key = _normalize_phone_identity_key(value)
+        if key:
+            keys.add(key)
+    return keys
+
+
+def _email_identity_keys(values) -> set[str]:
+    keys: set[str] = set()
+    for value in values or []:
+        if isinstance(value, dict):
+            value = value.get("email_value") or value.get("email_address") or value.get("value")
+        key = _normalize_email_identity_key(value)
+        if key:
+            keys.add(key)
+    return keys
+
+
+def _load_contact_identity_values(conn, contact_id: int) -> tuple[set[str], set[str]]:
+    phone_rows = conn.execute("SELECT * FROM phones WHERE contact_id = ?", (int(contact_id),)).fetchall()
+    email_rows = conn.execute("SELECT * FROM emails WHERE contact_id = ?", (int(contact_id),)).fetchall()
+    return (
+        _phone_identity_keys(dict(row) for row in phone_rows),
+        _email_identity_keys(dict(row) for row in email_rows),
+    )
+
+
+def _identity_keys_overlap(
+    left_phones: set[str],
+    left_emails: set[str],
+    right_phones: set[str],
+    right_emails: set[str],
+) -> bool:
+    return bool(left_phones & right_phones) or bool(left_emails & right_emails)
+
+
+def _find_local_contact_id_by_identity(
+    conn,
+    given_name,
+    family_name,
+    phones=None,
+    emails=None,
+    *,
+    exclude_ids: set[int] | None = None,
+) -> int | None:
+    """Return a local contact that matches name plus a shared phone or email."""
+    given_key, family_key = _contact_name_identity_key(given_name, family_name)
+    if not given_key or not family_key:
+        return None
+    incoming_phones = _phone_identity_keys(phones)
+    incoming_emails = _email_identity_keys(emails)
+    if not incoming_phones and not incoming_emails:
+        return None
+    excluded = {int(item) for item in (exclude_ids or set()) if int(item or 0) > 0}
+    candidates = [dict(row) for row in conn.execute("SELECT * FROM contacts").fetchall()]
+    candidates.sort(
+        key=lambda row: (
+            str(row.get("last_updated") or ""),
+            int(row.get("shared_drive_revision") or 0),
+            int(row.get("id") or 0),
+        ),
+        reverse=True,
+    )
+    for row in candidates:
+        contact_id = int(row.get("id") or 0)
+        if contact_id <= 0 or contact_id in excluded:
+            continue
+        if _contact_name_identity_key(row.get("given_name"), row.get("family_name")) != (given_key, family_key):
+            continue
+        local_phones, local_emails = _load_contact_identity_values(conn, contact_id)
+        if _identity_keys_overlap(incoming_phones, incoming_emails, local_phones, local_emails):
+            return contact_id
+    return None
+
+
+def collapse_stale_identity_duplicate_contacts(conn) -> list[int]:
+    """Delete extra local rows that share a name plus phone or email with a newer keeper."""
+    rows = [dict(row) for row in conn.execute("SELECT * FROM contacts").fetchall()]
+    groups: dict[tuple[str, str], list[dict]] = {}
+    for row in rows:
+        name_key = _contact_name_identity_key(row.get("given_name"), row.get("family_name"))
+        if not name_key[0] or not name_key[1]:
+            continue
+        groups.setdefault(name_key, []).append(row)
+
+    deleted_ids: list[int] = []
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        identity_by_id = {
+            int(row["id"]): _load_contact_identity_values(conn, int(row["id"]))
+            for row in group
+        }
+        parent = {int(row["id"]): int(row["id"]) for row in group}
+
+        def _root(contact_id: int) -> int:
+            while parent[contact_id] != contact_id:
+                parent[contact_id] = parent[parent[contact_id]]
+                contact_id = parent[contact_id]
+            return contact_id
+
+        for left_index, left in enumerate(group):
+            left_id = int(left["id"])
+            left_phones, left_emails = identity_by_id[left_id]
+            if not left_phones and not left_emails:
+                continue
+            for right in group[left_index + 1 :]:
+                right_id = int(right["id"])
+                right_phones, right_emails = identity_by_id[right_id]
+                if _identity_keys_overlap(left_phones, left_emails, right_phones, right_emails):
+                    left_root = _root(left_id)
+                    right_root = _root(right_id)
+                    if left_root != right_root:
+                        parent[right_root] = left_root
+
+        clusters: dict[int, list[dict]] = {}
+        for row in group:
+            clusters.setdefault(_root(int(row["id"])), []).append(row)
+        for cluster in clusters.values():
+            if len(cluster) < 2:
+                continue
+            keeper = max(
+                cluster,
+                key=lambda row: (
+                    str(row.get("last_updated") or ""),
+                    int(row.get("shared_drive_revision") or 0),
+                    int(row.get("id") or 0),
+                ),
+            )
+            keeper_id = int(keeper["id"])
+            for row in cluster:
+                extra_id = int(row["id"])
+                if extra_id == keeper_id:
+                    continue
+                _delete_local_contact_record(conn, extra_id)
+                deleted_ids.append(extra_id)
+    return deleted_ids
+
+
+def _prune_local_contacts_missing_google_ids(conn, live_google_ids: set[str]) -> list[int]:
+    """Delete local contacts whose Google person id is no longer in a full Google list."""
+    live_ids = {_clean(item) for item in live_google_ids if _clean(item)}
+    if not live_ids:
+        return []
+    deleted_ids: list[int] = []
+    rows = conn.execute(
+        """
+        SELECT id, google_contact_id
+        FROM contacts
+        WHERE COALESCE(google_contact_id, '') != ''
+        """
+    ).fetchall()
+    for row in rows:
+        google_contact_id = _clean(row["google_contact_id"])
+        if google_contact_id in live_ids:
+            continue
+        contact_id = int(row["id"])
+        _delete_local_contact_record(conn, contact_id)
+        deleted_ids.append(contact_id)
+    return deleted_ids
+
+
 def _sync_shared_contact_revision_only(conn, contact_id: int, remote_revision: int) -> None:
     conn.execute(
         """
@@ -4894,6 +5075,20 @@ def _merge_shared_contact_record_from_drive(conn, payload: dict) -> int:
         if gid_match:
             target_id = int(gid_match["id"])
             existing_row = gid_match
+            _remap_shared_contact_payload_contact_id(payload, target_id)
+            normalized_contact_row["id"] = target_id
+
+    if not existing_row:
+        identity_id = _find_local_contact_id_by_identity(
+            conn,
+            normalized_contact_row.get("given_name"),
+            normalized_contact_row.get("family_name"),
+            payload.get("phones") or [],
+            payload.get("emails") or [],
+        )
+        if identity_id:
+            target_id = identity_id
+            existing_row = conn.execute("SELECT * FROM contacts WHERE id = ?", (target_id,)).fetchone()
             _remap_shared_contact_payload_contact_id(payload, target_id)
             normalized_contact_row["id"] = target_id
 
@@ -5992,6 +6187,17 @@ def import_shared_contacts_from_google_drive(
 
         for contact_id in sorted(removed_contact_ids):
             _delete_local_contact_record(conn, contact_id)
+        if collapse_stale_identity_duplicate_contacts(conn):
+            conn.execute(
+                """
+                UPDATE google_sync_state
+                SET
+                  contacts_manifest_needs_drive_export = 1,
+                  updated_at = ?
+                WHERE id = 1
+                """,
+                (_now_text(),),
+            )
 
         _replace_contact_assignment_options(conn, payload.get("assignment_options") or [])
         conn.execute(
@@ -10461,8 +10667,10 @@ def sync_google_contact_changes(
         access_token,
         stored_sync_token,
     )
+    used_full_fetch = not bool(stored_sync_token)
     if token_invalid and not force_full_fetch:
         people, next_sync_token, token_invalid = _fetch_google_connections_for_sync(access_token, "")
+        used_full_fetch = True
 
     created_count = 0
     updated_count = 0
@@ -10531,9 +10739,41 @@ def sync_google_contact_changes(
                 touched_contact_ids.append(contact_id)
                 updated_count += 1
             else:
-                contact_id = _insert_contact_from_google_person(conn, fields, status="synced")
-                touched_contact_ids.append(contact_id)
-                created_count += 1
+                identity_id = _find_local_contact_id_by_identity(
+                    conn,
+                    fields.get("given_name"),
+                    fields.get("family_name"),
+                    fields.get("phones") or [],
+                    fields.get("emails") or [],
+                )
+                if identity_id:
+                    _update_contact_from_google_person(conn, identity_id, fields)
+                    touched_contact_ids.append(identity_id)
+                    updated_count += 1
+                else:
+                    contact_id = _insert_contact_from_google_person(conn, fields, status="synced")
+                    touched_contact_ids.append(contact_id)
+                    created_count += 1
+
+        stale_duplicate_ids = collapse_stale_identity_duplicate_contacts(conn)
+        if used_full_fetch:
+            live_google_ids = {
+                _clean(person.get("resourceName"))
+                for person in people
+                if _clean(person.get("resourceName")) and not (person.get("metadata") or {}).get("deleted")
+            }
+            stale_duplicate_ids.extend(_prune_local_contacts_missing_google_ids(conn, live_google_ids))
+        if stale_duplicate_ids:
+            conn.execute(
+                """
+                UPDATE google_sync_state
+                SET
+                  contacts_manifest_needs_drive_export = 1,
+                  updated_at = ?
+                WHERE id = 1
+                """,
+                (_now_text(),),
+            )
 
         if next_sync_token:
             conn.execute(

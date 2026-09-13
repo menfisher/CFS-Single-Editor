@@ -941,15 +941,80 @@ window.addEventListener("DOMContentLoaded", () => {
       .join(", ");
   };
 
-  const formatFieldListAddressLines = (address) => {
-    const { street1, street2, city, text } = splitFieldListAddressParts(address);
-    if (street1 && street2) {
-      // Prefer city/state/ZIP on the street-2 line when both streets exist.
-      if (city) return [street1, `${street2}, ${city}`];
-      return [street1, street2];
+  const isFieldListUnitOrAptPart = (part) => (
+    /^(?:#\S+|(?:apt|apartment|suite|ste|unit)\b.*)$/i.test(String(part || "").trim())
+  );
+
+  const wrapFieldListAddressWords = (text, widthPx) => {
+    const value = String(text || "").trim();
+    if (!value) return [];
+    if (textFitsWidth(value, widthPx, "normal")) return [value];
+    const words = value.split(/\s+/).filter(Boolean);
+    if (words.length <= 1) return [value];
+    const lines = [];
+    let current = words[0];
+    words.slice(1).forEach((word) => {
+      const candidate = `${current} ${word}`;
+      if (textFitsWidth(candidate, widthPx, "normal")) current = candidate;
+      else {
+        lines.push(current);
+        current = word;
+      }
+    });
+    if (current) lines.push(current);
+    return lines;
+  };
+
+  const wrapFieldListAddressText = (text, widthPx) => {
+    const value = String(text || "").trim();
+    if (!value) return [];
+    if (textFitsWidth(value, widthPx, "normal")) return [value];
+    const parts = value.split(",").map((part) => part.trim()).filter(Boolean);
+    if (parts.length > 1) {
+      const lines = [];
+      let current = parts[0];
+      parts.slice(1).forEach((part) => {
+        const candidate = `${current}, ${part}`;
+        if (textFitsWidth(candidate, widthPx, "normal") || isFieldListUnitOrAptPart(part)) {
+          current = candidate;
+        } else {
+          lines.push(`${current},`);
+          current = part;
+        }
+      });
+      if (current) lines.push(current);
+      return lines.flatMap((line) => (
+        textFitsWidth(line, widthPx, "normal")
+          ? [line]
+          : wrapFieldListAddressWords(line.replace(/,$/, "").trim(), widthPx)
+      ));
     }
-    const oneLine = formatFieldListAddressOneLine(address);
-    return oneLine ? [oneLine] : [];
+    return wrapFieldListAddressWords(value, widthPx);
+  };
+
+  const formatFieldListAddressLines = (address, contact = null) => {
+    const { street1, street2, city, text } = splitFieldListAddressParts(address);
+    const street = [street1, ...String(street2 || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean)]
+      .filter(Boolean)
+      .join(", ");
+    const widthPx = getTextColumnWidthPx(contact);
+    if (!street && !city) {
+      const fallback = String(text || address || "").trim();
+      return fallback ? wrapFieldListAddressText(fallback, widthPx) : [];
+    }
+    if (!street) return wrapFieldListAddressText(city, widthPx);
+    if (!city) return wrapFieldListAddressText(street, widthPx);
+    const oneLine = `${street}, ${city}`;
+    if (textFitsWidth(oneLine, widthPx, "normal")) return [oneLine];
+    if (textFitsWidth(street, widthPx, "normal")) return [street, city];
+    const streetLines = wrapFieldListAddressText(street, widthPx);
+    if (streetLines.length) {
+      const combined = `${streetLines[streetLines.length - 1]}, ${city}`;
+      if (textFitsWidth(combined, widthPx, "normal")) {
+        return [...streetLines.slice(0, -1), combined];
+      }
+    }
+    return [...streetLines, city];
   };
 
   const getContactAddressSource = (contact) => (
@@ -959,7 +1024,7 @@ window.addEventListener("DOMContentLoaded", () => {
   );
 
   const getContactAddressLines = (contact) => getContactAddressSource(contact)
-    .flatMap((address) => formatFieldListAddressLines(address))
+    .flatMap((address) => formatFieldListAddressLines(address, contact))
     .filter(Boolean);
 
   const getCompactAddressLines = (contact) => getContactAddressSource(contact)

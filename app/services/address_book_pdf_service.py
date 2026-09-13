@@ -1317,12 +1317,24 @@ def _build_booklet_sheet_maps(total_pages: int) -> list[dict[str, list[int]]]:
     return sheets
 
 
-def _letter_positions(page_width: float, page_height: float, *, right_justify: bool) -> list[tuple[float, float]]:
+# Front (odd) sheets are left-flush. Back (even) sheets are right-flush so the
+# 4-up block registers through the paper after a long-edge duplex flip.
+
+def _letter_block_offset_x(page_width: float, *, right_justify: bool) -> float:
     letter_width = 8.5 * 72.0
-    letter_height = 11.0 * 72.0
     block_width = page_width * 2.0
+    spare = max(0.0, letter_width - block_width)
+    if right_justify:
+        return spare
+    return 0.0
+
+
+def _letter_positions(page_width: float, page_height: float, *, right_justify: bool) -> list[tuple[float, float]]:
+    letter_height = 11.0 * 72.0
     block_height = page_height * 2.0
-    offset_x = max(0.0, letter_width - block_width) if right_justify else 0.0
+    offset_x = _letter_block_offset_x(page_width, right_justify=right_justify)
+    # Top-aligned: sheet top edge is the top trim.
+    # Layout margins (Top/Left/…) stay inside each logical page: cut mark → text.
     top_y = letter_height - page_height
     bottom_y = letter_height - block_height
     return [
@@ -1334,14 +1346,16 @@ def _letter_positions(page_width: float, page_height: float, *, right_justify: b
 
 
 def _draw_cut_marks(page: _PdfPage, slot_width: float, slot_height: float, *, right_justify: bool) -> None:
-    letter_width = page.width
     letter_height = page.height
-    block_width = slot_width * 2.0
     block_height = slot_height * 2.0
-    offset_x = max(0.0, letter_width - block_width) if right_justify else 0.0
+    # Front marks stay on the sheet left edge with the left-flush content.
+    if right_justify:
+        offset_x = _letter_block_offset_x(slot_width, right_justify=True)
+    else:
+        offset_x = 0.0
     x0 = offset_x
     x1 = offset_x + slot_width
-    x2 = offset_x + block_width
+    x2 = offset_x + (slot_width * 2.0)
     y0 = letter_height
     y1 = letter_height - slot_height
     y2 = letter_height - block_height
@@ -1351,10 +1365,8 @@ def _draw_cut_marks(page: _PdfPage, slot_width: float, slot_height: float, *, ri
         page.rules.append(_PdfRule(x - tick, y, x + tick, y, 0.5))
         page.rules.append(_PdfRule(x, y - tick, x, y + tick, 0.5))
 
-    top_xs = [x0, x1] if right_justify else [x1, x2]
-    for x in top_xs:
-        plus(x, y0)
     for x in [x0, x1, x2]:
+        plus(x, y0)
         plus(x, y1)
         plus(x, y2)
 
@@ -2021,9 +2033,14 @@ def build_address_book_pdf(
                         draw_phone(phones[phone_index], use_full_custom_label=True)
                     if line_index < len(below_lines):
                         kind, line, uri, has_coordinates = below_lines[line_index]
-                        x = main_text_x + space_width
+                        # Never draw address text under the phone column.
+                        min_address_x = main_text_x + space_width
+                        x = min_address_x
                         if address_align_right:
-                            x = max(margin_left, page_width - margin_right - tw(line, font_size))
+                            x = max(
+                                min_address_x,
+                                page_width - margin_right - tw(line, font_size),
+                            )
                         if kind in ("pb", "pa"):
                             add_text(line, x, italic=True)
                         else:

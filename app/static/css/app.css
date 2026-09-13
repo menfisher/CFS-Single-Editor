@@ -600,19 +600,21 @@
 .address-book-pdf-cover-choice-block {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
+  align-items: start;
+  gap: 8px 10px;
   padding: 9px;
   border: 1px solid rgba(31, 52, 55, 0.14);
   border-radius: 8px;
   background: #c8f0cb;
 }
 
-.address-book-pdf-cover-checks {
-  grid-column: 1 / -1;
+.address-book-pdf-cover-right-checks {
+  grid-column: 2;
+  grid-row: 1 / span 2;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
+  gap: 8px;
+  justify-items: stretch;
+  align-content: start;
 }
 
 .address-book-pdf-cover-button {
@@ -624,8 +626,6 @@
 }
 
 .address-book-pdf-cover-date-row {
-  grid-column: 2;
-  justify-self: stretch;
   margin: 0;
   font-size: 0.82rem;
   font-weight: 650;

@@ -286,14 +286,18 @@
           </label>
         </div>
         <div class="address-book-pdf-cover-choice-block">
-          <div class="address-book-pdf-cover-checks">
-            <label class="address-book-pdf-check-row address-book-pdf-cover-include-row">
-              <input type="checkbox" data-address-book-pdf-cover-include>
-              <span>Cover picture</span>
-            </label>
+          <label class="address-book-pdf-check-row address-book-pdf-cover-include-row">
+            <input type="checkbox" data-address-book-pdf-cover-include>
+            <span>Cover picture</span>
+          </label>
+          <div class="address-book-pdf-cover-right-checks">
             <label class="address-book-pdf-check-row address-book-pdf-cover-include-row">
               <input type="checkbox" data-address-book-pdf-cover-title-include>
               <span>Title</span>
+            </label>
+            <label class="address-book-pdf-check-row address-book-pdf-cover-date-row">
+              <input type="checkbox" data-address-book-pdf-cover-date-include>
+              <span>Date</span>
             </label>
           </div>
           <button
@@ -302,12 +306,8 @@
             data-address-book-pdf-cover-open
             hidden
           >
-            Choose picture
+            Choose/Edit picture
           </button>
-          <label class="address-book-pdf-check-row address-book-pdf-cover-date-row">
-            <input type="checkbox" data-address-book-pdf-cover-date-include>
-            <span>Date</span>
-          </label>
           <div class="address-book-pdf-cover-summary" data-address-book-pdf-cover-summary hidden></div>
         </div>
         <div class="address-book-pdf-insert-file-block">
@@ -527,5 +527,5 @@
 
 {% block extra_scripts %}
   <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
-  <script src="/static/js/address_book_pdf.js?v=73"></script>
+  <script src="/static/js/address_book_pdf.js?v=74"></script>
 {% endblock %}

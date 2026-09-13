@@ -432,7 +432,10 @@ async def print_address_book_paper_page(request: Request):
             upload_address_book_printed_pdf_to_google_drive(filename, pdf_bytes)
         except (RuntimeError, HTTPError, URLError):
             notice = "address_book_pdf_preview_drive_failed"
-    return RedirectResponse(url=f"/address-book/pdf/view/{filename}?preset_id={saved_id}&notice={notice}", status_code=303)
+    return RedirectResponse(
+        url=f"/address-book/pdf/view/{filename}?preset_id={saved_id}&notice={notice}&autoprint=1",
+        status_code=303,
+    )
 
 
 @router.get("/pdf/view/{filename}", response_class=HTMLResponse)
