@@ -2,8 +2,13 @@
   "format": "contactsfreeshare.published_revisions.v1",
   "revisions": [
     {
-      "version": "1.221",
+      "version": "1.222",
+      "date_display": "9/15/2026",
+      "description": "Rename the catch-all shared group in place from Save Settings."
+    },
+    {
       "date_display": "9/13/2026",
+      "version": "1.221",
       "description": "Leftover-contact cleanup, long-address wrap, cover-picture persist, and paper-book left-flush margins."
     },
     {
