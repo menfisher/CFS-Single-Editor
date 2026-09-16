@@ -97,6 +97,22 @@ def build_shared_group_name(group_name: str) -> str:
     return f"{base} (shared)"
 
 
+def group_names_equivalent(left: str, right: str) -> bool:
+    def variants(name: str) -> set[str]:
+        cleaned = str(name or "").strip()
+        if not cleaned:
+            return set()
+        names = {cleaned.casefold()}
+        base = re.sub(r"\s*\(shared\)\s*$", "", cleaned, flags=re.I).strip()
+        if base:
+            names.add(base.casefold())
+            names.add(f"{base} (Shared)".casefold())
+            names.add(f"{base} (shared)".casefold())
+        return names
+
+    return bool(variants(left) & variants(right))
+
+
 def normalize_person_resource_name(resource_name: str) -> str:
     if not resource_name:
         return resource_name
@@ -210,6 +226,32 @@ def create_contact_group(creds: Credentials, group_name: str) -> str | None:
         if exc.resp.status == 409 or "ALREADY_EXISTS" in str(exc):
             return find_group_by_name(creds, name)
         raise
+
+
+def update_contact_group_name(
+    creds: Credentials, resource_name: str, group_name: str
+) -> str | None:
+    group_id = str(resource_name or "").strip()
+    next_name = build_shared_group_name(group_name)
+    if not group_id or not next_name:
+        return None
+    details = get_group_details(creds, group_id, 1)
+    current_name = str(details.get("formattedName") or details.get("name") or "").strip()
+    if group_names_equivalent(current_name, next_name) and current_name == next_name:
+        return group_id
+    body = {
+        "contactGroup": {"name": next_name},
+        "updateGroupFields": "name",
+    }
+    etag = str(details.get("etag") or "").strip()
+    if etag:
+        body["contactGroup"]["etag"] = etag
+    service = people_service(creds)
+    data = service.contactGroups().update(
+        resourceName=group_id,
+        body=body,
+    ).execute()
+    return str(data.get("resourceName") or group_id)
 
 
 def get_group_details(creds: Credentials, resource_name: str, max_members: int = 2000) -> dict[str, Any]:

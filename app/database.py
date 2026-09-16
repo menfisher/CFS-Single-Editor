@@ -544,6 +544,7 @@ def _ensure_google_sync_columns(conn: sqlite3.Connection) -> None:
         ("public_web_url", "TEXT", "''"),
         ("share_web_api_key", "TEXT", "''"),
         ("share_sync_last_message", "TEXT", "''"),
+        ("pending_shared_group_rename", "TEXT", "''"),
         ("google_contacts_sync_token", "TEXT", "''"),
     ]:
         if state_columns and column_name not in state_columns:

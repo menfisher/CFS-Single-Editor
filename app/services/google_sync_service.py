@@ -266,6 +266,13 @@ SYNC_NOTICE_MESSAGES = {
     "google_sync_changes_none": "Google Contacts is already up to date with the app.",
     "google_sync_changes_failed": "Sync from Google Contacts failed. Review Google Connect status and try again.",
     "google_sync_changes_conflicts": "Some Google contact changes were skipped because the app has unsaved local edits for those contacts.",
+    "shared_group_renamed": "The shared Google group was renamed in this account and on connected shared accounts. Contacts were not re-uploaded.",
+    "shared_group_rename_local_only": "The shared group name was saved locally. Connect Google to rename the Google Contacts label on this account and shared accounts.",
+    "shared_group_rename_not_found": "The shared group name was saved. A Google Contacts group with the previous name was not found, so shared account labels were not renamed.",
+    "shared_group_rename_collision": "The shared group name was saved, but Google Contacts already has a different group with the new name. The shared label was not renamed in place.",
+    "shared_group_rename_google_failed": "The shared group name was saved locally, but renaming the Google Contacts label failed. Try Save Settings again after reconnecting Google.",
+    "shared_group_rename_share_skipped": "The shared Google group was renamed in this account. Shared account labels were not updated because Share is not configured.",
+    "shared_group_rename_share_failed": "The shared Google group was renamed in this account. Shared account labels could not be updated. Deploy the Share app update, then Save Settings again.",
 }
 
 GOOGLE_UPLOAD_PERSON_FIELDS = ",".join(
@@ -2196,6 +2203,8 @@ def is_non_editor_access_role(value: str | None = None) -> bool:
 
 
 def is_share_contacts_nav_visible() -> bool:
+    if SINGLE_EDITOR_ONLY:
+        return False
     summary = get_google_sync_summary()
     account = summary.get("account") or {}
     state = summary.get("state") or {}

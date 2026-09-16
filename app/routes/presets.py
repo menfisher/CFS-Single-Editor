@@ -5,6 +5,7 @@ from urllib.error import HTTPError, URLError
 from fastapi import APIRouter, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from app.config import SINGLE_EDITOR_ONLY
 from app.services.field_list_service import (
     get_address_book_settings,
     save_address_book_settings,
@@ -14,6 +15,7 @@ from app.services.preset_service import (
     delete_book_layout_preset,
     duplicate_book_layout_preset,
     get_book_layout_preset_editor,
+    get_shared_contacts_group_name,
     save_book_layout_preset,
     set_default_book_layout_preset,
 )
@@ -176,10 +178,11 @@ def _app_settings_core_changed(
         return True
     if str(state.get("address_book_pdf_share_folder_name") or "") != str(form.get("address_book_pdf_share_folder_name") or "").strip():
         return True
-    if str(state.get("public_web_url") or "") != str(form.get("public_web_url") or "").strip().rstrip("/"):
-        return True
-    if str(form.get("share_web_api_key") or "").strip():
-        return True
+    if not SINGLE_EDITOR_ONLY:
+        if str(state.get("public_web_url") or "") != str(form.get("public_web_url") or "").strip().rstrip("/"):
+            return True
+        if str(form.get("share_web_api_key") or "").strip():
+            return True
     return False
 
 
@@ -319,14 +322,16 @@ async def save_app_settings_page(request: Request):
         folder_id=str(form.get("address_book_pdf_share_folder_id") or ""),
         folder_name=str(form.get("address_book_pdf_share_folder_name") or ""),
     )
-    current_share_url = str(current_state.get("public_web_url") or "").strip().rstrip("/")
-    requested_share_url = str(form.get("public_web_url") or "").strip().rstrip("/")
-    share_settings_unlocked = str(form.get("share_settings_unlocked") or "").lower() in {"1", "true", "yes", "on"}
-    if current_share_url and requested_share_url != current_share_url and not share_settings_unlocked:
-        requested_share_url = current_share_url
-    save_public_web_url(requested_share_url)
-    if not current_share_url or share_settings_unlocked or not bool(current_state.get("share_web_api_key_configured")):
-        save_share_web_api_key(str(form.get("share_web_api_key") or ""))
+    if not SINGLE_EDITOR_ONLY:
+        current_share_url = str(current_state.get("public_web_url") or "").strip().rstrip("/")
+        requested_share_url = str(form.get("public_web_url") or "").strip().rstrip("/")
+        share_settings_unlocked = str(form.get("share_settings_unlocked") or "").lower() in {"1", "true", "yes", "on"}
+        if current_share_url and requested_share_url != current_share_url and not share_settings_unlocked:
+            requested_share_url = current_share_url
+        save_public_web_url(requested_share_url)
+        if not current_share_url or share_settings_unlocked or not bool(current_state.get("share_web_api_key_configured")):
+            save_share_web_api_key(str(form.get("share_web_api_key") or ""))
+    previous_shared_group_name = get_shared_contacts_group_name()
     if _save_current_book_layout_colors(form):
         book_layouts_changed = True
     else:
@@ -345,6 +350,32 @@ async def save_app_settings_page(request: Request):
         book_layouts_exported=book_layouts_exported,
         allow_multi_editor_unlock=False,
     )
+    next_shared_group_name = get_shared_contacts_group_name()
+    from app.services.shared_group_rename_service import (
+        apply_shared_contacts_group_rename,
+        get_pending_shared_group_rename,
+        sync_share_invite_display_name,
+    )
+
+    rename_old_name = ""
+    rename_new_name = ""
+    if previous_shared_group_name.casefold() != next_shared_group_name.casefold():
+        rename_old_name = previous_shared_group_name
+        rename_new_name = next_shared_group_name
+    else:
+        pending = get_pending_shared_group_rename()
+        pending_new = str(pending.get("new_name") or "").strip()
+        pending_old = str(pending.get("old_name") or "").strip()
+        if pending_new and pending_new.casefold() == next_shared_group_name.casefold():
+            rename_old_name = pending_old or previous_shared_group_name
+            rename_new_name = pending_new
+    if rename_old_name and rename_new_name:
+        rename_result = apply_shared_contacts_group_rename(rename_old_name, rename_new_name)
+        rename_notice = str(rename_result.get("notice_key") or "").strip()
+        if rename_notice:
+            notice = rename_notice
+    else:
+        sync_share_invite_display_name(next_shared_group_name)
     return RedirectResponse(url=f"/presets/app-settings?notice={notice}", status_code=303)
 
 

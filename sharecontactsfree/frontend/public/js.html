@@ -198,6 +198,23 @@ let buildInviteUrl = function(baseUrl, recipientEmail){
     return `${base}${base.includes("?") ? "&" : "?"}email=${encodeURIComponent(email)}`
 }
 
+let KEEP_PAGE_OPEN_PLAIN = "KEEP THIS PAGE OPEN until the contacts finish downloading."
+let RETRY_IMPORT_PLAIN = "If you close the page or open another tab, use the Retry button to restart the import."
+
+let inviteDisplayName = function(groupName, resourceName, appConfig){
+    let googleName = String(groupName || "").trim()
+    let settingsName = String((appConfig && appConfig.sharedContactsGroupName) || "").trim()
+    let settingsResource = String((appConfig && appConfig.sharedContactsGroupResourceName) || "").trim()
+    let resource = String(resourceName || "").trim()
+    if (settingsName && settingsResource && resource === settingsResource){
+        return settingsName
+    }
+    if (settingsName && googleName && settingsName.toLowerCase() === googleName.toLowerCase()){
+        return settingsName
+    }
+    return googleName || settingsName
+}
+
 let openShareInviteMailto = function(ownerEmail, groupName, recipientEmails, inviteUrl){
     let recipients = (recipientEmails || []).map(email=>String(email || "").trim().toLowerCase()).filter(Boolean)
     if (!recipients.length){
@@ -207,7 +224,7 @@ let openShareInviteMailto = function(ownerEmail, groupName, recipientEmails, inv
     let bodyLines = [
         "Hi,",
         "",
-        `${ownerEmail} shared contact group "${groupName}" with you.`,
+        `${ownerEmail} shared the contact group "${groupName}" with you.`,
         "",
     ]
     if (recipients.length === 1){
@@ -221,6 +238,7 @@ let openShareInviteMailto = function(ownerEmail, groupName, recipientEmails, inv
             bodyLines.push("", `${email}:`, buildInviteUrl(inviteUrl, email))
         })
     }
+    bodyLines.push("", KEEP_PAGE_OPEN_PLAIN, "", RETRY_IMPORT_PLAIN)
     let body = bodyLines.join("\n")
     let params = [
         `bcc=${encodeMailtoValue(recipients.join(","))}`,
@@ -745,6 +763,8 @@ let clearOwnerShareNotices = function(options){
         inviteRecipientEmail: String(window.INVITE_RECIPIENT_EMAIL || "").trim().toLowerCase(),
         sendShareEmailsEnabled: false,
         inviteUrl: "",
+        sharedContactsGroupName: "",
+        sharedContactsGroupResourceName: "",
         syncConfirm: {
             resourceName: "",
             groupName: ""
@@ -868,7 +888,12 @@ let clearOwnerShareNotices = function(options){
                         if (notifyByEmail){
                             if (this.sendShareEmailsEnabled){
                                 this.shareStatusMessage += ` Email sent to ${notified} recipient(s).`
-                            } else if (openShareInviteMailto(key, name, emails, this.inviteUrl)){
+                            } else if (openShareInviteMailto(
+                                key,
+                                (shareStatus && shareStatus.inviteGroupName) || inviteDisplayName(name, resourceName, this),
+                                emails,
+                                this.inviteUrl
+                            )){
                                 this.shareStatusMessage += " Your email app should open with the invite — click Send."
                             } else {
                                 this.shareStatusMessage += " Email notification skipped — send the invite link manually."
@@ -2332,6 +2357,8 @@ let clearOwnerShareNotices = function(options){
         if (result && result.appConfig){
             this.sendShareEmailsEnabled = !!result.appConfig.sendShareEmails
             this.inviteUrl = String(result.appConfig.inviteUrl || "").trim()
+            this.sharedContactsGroupName = String(result.appConfig.sharedContactsGroupName || "").trim()
+            this.sharedContactsGroupResourceName = String(result.appConfig.sharedContactsGroupResourceName || "").trim()
         }
         this.sharedGroups.forEach((group)=>{
             this.updateSharedImportProgressUi(group)

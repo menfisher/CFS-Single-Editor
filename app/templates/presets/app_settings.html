@@ -114,6 +114,7 @@
             </p>
           </fieldset>
 
+          {% if not single_editor_only %}
           {% set share_settings_configured = (state.public_web_url or '')|trim != '' %}
           <fieldset class="app-settings-timeout-fieldset app-settings-share-settings" data-share-configured="{{ 1 if share_settings_configured else 0 }}">
             <legend>Share web app</legend>
@@ -162,6 +163,7 @@
               {% endif %}
             </p>
           </fieldset>
+          {% endif %}
 
         </div>
 
@@ -247,7 +249,7 @@
                 spellcheck="false"
                 autocomplete="off"
               >
-              <p class="muted app-settings-field-help">Used in Google group membership for every shared field/meeting contact, alongside <code>{Field} - {Meeting} (Shared)</code>.</p>
+              <p class="muted app-settings-field-help">Used in Google group membership for every shared field/meeting contact, alongside <code>{Field} - {Meeting} (Shared)</code>. Changing this name renames that one Google label in this account and in each account currently sharing it. Contacts are not re-uploaded.</p>
             </div>
           </section>
           <div class="editor-actions-links app-settings-actions">

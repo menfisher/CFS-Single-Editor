@@ -385,6 +385,31 @@ async def cfs_sync_contact_changes(request: Request):
     return JSONResponse({"ok": True, "result": result})
 
 
+@app.post("/api/cfs/rename-shared-group")
+async def cfs_rename_shared_group(request: Request):
+    """Called by CFS after the all-contacts shared group name changes."""
+    api_key = str(request.headers.get("X-CFS-API-Key") or "").strip()
+    if not CFS_API_KEY or api_key != CFS_API_KEY:
+        raise HTTPException(403, "Forbidden")
+    body = await request.json()
+    owner_email = str(body.get("owner_email") or "").strip().lower()
+    resource_name = str(body.get("resource_name") or "").strip()
+    old_name = str(body.get("old_name") or "").strip()
+    new_name = str(body.get("new_name") or "").strip()
+    if not owner_email:
+        raise HTTPException(400, "owner_email required")
+    if not new_name:
+        raise HTTPException(400, "new_name required")
+    result = await asyncio.to_thread(
+        app_data_svc.rename_shared_group_rpc,
+        owner_email,
+        resource_name,
+        old_name,
+        new_name,
+    )
+    return JSONResponse({"ok": bool(result.get("ok")), "result": result})
+
+
 def _kick_push_queue_after_cfs_sync(owner_email: str, person_count: int) -> None:
     from .services.push_worker import kick_push_queue
 

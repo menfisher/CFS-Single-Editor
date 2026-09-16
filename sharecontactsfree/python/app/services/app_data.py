@@ -51,6 +51,20 @@ def compact_app_data(
         "groups": compact_groups,
         "sharedGroups": app_data.get("sharedGroups") or [],
     }
+    settings_name = str(
+        (app_data.get("sharedContactsGroupName") if app_data else "")
+        or ((existing or {}).get("sharedContactsGroupName") if existing else "")
+        or ""
+    ).strip()
+    settings_resource = str(
+        (app_data.get("sharedContactsGroupResourceName") if app_data else "")
+        or ((existing or {}).get("sharedContactsGroupResourceName") if existing else "")
+        or ""
+    ).strip()
+    if settings_name:
+        result["sharedContactsGroupName"] = settings_name
+    if settings_resource:
+        result["sharedContactsGroupResourceName"] = settings_resource
     if existing:
         if existing.get("invitedByOwner"):
             result["invitedByOwner"] = existing["invitedByOwner"]
@@ -432,6 +446,10 @@ def load_app(owner_email: str, view_mode: str, *, recover: bool = False) -> dict
         "appConfig": {
             "sendShareEmails": SEND_SHARE_EMAILS,
             "inviteUrl": build_recipient_invite_url(owner_email if view_mode == "shared" else ""),
+            "sharedContactsGroupName": str(stored.get("sharedContactsGroupName") or "").strip(),
+            "sharedContactsGroupResourceName": str(
+                stored.get("sharedContactsGroupResourceName") or ""
+            ).strip(),
         },
     }
     if view_mode == "shared":
@@ -737,6 +755,14 @@ def share_contact_group(
     canonical_share_id = _canonical_share_id_for_resource(
         group, owner_email, resource_name, allowed
     )
+    from .invite_email import invite_display_name
+
+    invite_name = invite_display_name(
+        name,
+        settings_name=str(app_data.get("sharedContactsGroupName") or "").strip(),
+        group_resource=resource_name,
+        settings_resource=str(app_data.get("sharedContactsGroupResourceName") or "").strip(),
+    )
     db.save_app_data(owner_email, app_data)
 
     share_status = {
@@ -748,6 +774,7 @@ def share_contact_group(
         "requestedContacts": len(member_ids),
         "preparedContacts": len(members_data),
         "missingContacts": len(member_ids) - len(members_data),
+        "inviteGroupName": invite_name,
     }
 
     for email in allowed:
@@ -766,7 +793,7 @@ def share_contact_group(
             share_id = str(existing.get("shareId") or canonical_share_id)
             shared_groups[existing_index] = {
                 **existing,
-                "name": name,
+                "name": invite_name,
                 "memberCount": len(member_ids),
                 "shareId": share_id,
             }
@@ -774,7 +801,7 @@ def share_contact_group(
             share_id = canonical_share_id
             shared_group = {
                 "owner": owner_email,
-                "name": name,
+                "name": invite_name,
                 "resourceName": resource_name,
                 "members": [],
                 "memberCount": len(member_ids),
@@ -789,14 +816,15 @@ def share_contact_group(
         invited[owner_email] = _iso_now()
         if notify_recipients:
             share_status["notified"] += 1
-            _send_invite_email(owner_email, email, name, creds)
+            _send_invite_email(owner_email, email, invite_name, creds)
         db.save_app_data(email, recipient_data)
 
     return {"groups": app_data.get("groups", {}), "shareStatus": share_status}
 
 
 def _send_invite_email(owner: str, recipient: str, group_name: str, creds) -> None:
-    from ..config import PUBLIC_WEB_URL, SEND_SHARE_EMAILS
+    from ..config import SEND_SHARE_EMAILS
+    from .invite_email import invite_email_html
 
     if not SEND_SHARE_EMAILS:
         return
@@ -805,11 +833,7 @@ def _send_invite_email(owner: str, recipient: str, group_name: str, creds) -> No
 
         service = build("gmail", "v1", credentials=creds, cache_discovery=False)
         url = build_recipient_invite_url(recipient)
-        body = (
-            f"<p>Hi,</p><p>{owner} shared contact group <b>{group_name}</b> with you.</p>"
-            f"<p>Sign in with <b>{recipient}</b> when prompted.</p>"
-            f'<p><a href="{url}">Open Share Google Contacts</a> to import.</p>'
-        )
+        body = invite_email_html(owner, recipient, group_name, url)
         import base64
         from email.mime.text import MIMEText
 
@@ -1377,6 +1401,140 @@ def sync_contact_changes_rpc(
     from .contact_sync import sync_contact_changes
 
     return sync_contact_changes(owner_email, owner_person_ids)
+
+
+def _recipient_group_resource(group: dict[str, Any]) -> str:
+    return _contact_group_resource(group.get("created") or group.get("googleGroupId"))
+
+
+def rename_shared_group_rpc(
+    owner_email: str,
+    resource_name: str,
+    old_name: str,
+    new_name: str,
+) -> dict[str, Any]:
+    """Rename one shared group label in Share records and recipient Google accounts."""
+    from ..people_recipient import (
+        group_names_equivalent,
+        update_contact_group_name,
+    )
+
+    owner = db.normalize_email(owner_email)
+    next_name = str(new_name or "").strip()
+    previous_name = str(old_name or "").strip()
+    requested_resource = str(resource_name or "").strip()
+    summary: dict[str, Any] = {
+        "ok": True,
+        "owner": owner,
+        "resource_name": requested_resource,
+        "old_name": previous_name,
+        "new_name": next_name,
+        "recipients_updated": 0,
+        "google_renamed": 0,
+        "skipped": 0,
+        "errors": [],
+    }
+    if not owner or not next_name:
+        summary["ok"] = False
+        summary["errors"].append("missing_owner_or_name")
+        return summary
+
+    owner_data = db.get_app_data(owner) or {}
+    owner_data["sharedContactsGroupName"] = next_name
+    if requested_resource:
+        owner_data["sharedContactsGroupResourceName"] = requested_resource
+    db.save_app_data(owner, owner_data)
+    if previous_name and previous_name.casefold() == next_name.casefold():
+        summary["display_name_saved"] = True
+        return summary
+
+    owner_groups = owner_data.get("groups") or {}
+    matched_resources: list[str] = []
+    if requested_resource and requested_resource in owner_groups:
+        matched_resources.append(requested_resource)
+    elif requested_resource:
+        matched_resources.append(requested_resource)
+    else:
+        for resource, group in owner_groups.items():
+            if group_names_equivalent(str(group.get("name") or ""), previous_name):
+                matched_resources.append(str(resource))
+
+    recipient_emails = set(db.list_app_data_emails())
+    recipient_emails.update(db.list_recipient_emails())
+    for group in owner_groups.values():
+        for email in group.get("shared") or []:
+            normalized = db.normalize_email(str(email or ""))
+            if normalized:
+                recipient_emails.add(normalized)
+    recipient_emails.discard(owner)
+
+    if not matched_resources and previous_name:
+        for email in recipient_emails:
+            recipient_data = db.get_app_data(email) or {}
+            for group in recipient_data.get("sharedGroups") or []:
+                if db.normalize_email(str(group.get("owner") or "")) != owner:
+                    continue
+                if group_names_equivalent(str(group.get("name") or ""), previous_name):
+                    resource = str(group.get("resourceName") or "").strip()
+                    if resource and resource not in matched_resources:
+                        matched_resources.append(resource)
+
+    if not matched_resources:
+        summary["ok"] = False
+        summary["errors"].append("shared_group_not_found")
+        return summary
+
+    summary["resource_name"] = matched_resources[0]
+    for resource in matched_resources:
+        group = owner_groups.get(resource)
+        if isinstance(group, dict):
+            group["name"] = next_name
+            for email in group.get("shared") or []:
+                normalized = db.normalize_email(str(email or ""))
+                if normalized:
+                    recipient_emails.add(normalized)
+        db.update_shared_contacts_group_name(owner, resource, next_name)
+
+    if owner_groups:
+        owner_data["groups"] = owner_groups
+        db.save_app_data(owner, owner_data)
+
+    for email in sorted(recipient_emails):
+        recipient_data = db.get_app_data(email) or {}
+        shared_groups = list(recipient_data.get("sharedGroups") or [])
+        changed = False
+        for group in shared_groups:
+            if db.normalize_email(str(group.get("owner") or "")) != owner:
+                continue
+            group_resource = str(group.get("resourceName") or "").strip()
+            matches_resource = bool(group_resource and group_resource in matched_resources)
+            matches_name = group_names_equivalent(str(group.get("name") or ""), previous_name)
+            if not matches_resource and not matches_name:
+                continue
+            created = _recipient_group_resource(group)
+            if created:
+                creds = recipient_credentials(email)
+                if not creds:
+                    summary["skipped"] += 1
+                    summary["errors"].append(f"{email}: not_connected")
+                    continue
+                try:
+                    update_contact_group_name(creds, created, next_name)
+                    summary["google_renamed"] += 1
+                except Exception as exc:
+                    summary["ok"] = False
+                    summary["errors"].append(f"{email}: {exc}")
+                    continue
+            group["name"] = next_name
+            changed = True
+            summary["recipients_updated"] += 1
+        if changed:
+            recipient_data["sharedGroups"] = shared_groups
+            db.save_app_data(email, recipient_data, flush=True)
+
+    if summary["errors"] and summary["recipients_updated"] <= 0:
+        summary["ok"] = False
+    return summary
 
 
 def retry_share_push(

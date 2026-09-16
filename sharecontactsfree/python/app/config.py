@@ -35,7 +35,7 @@ APP_BASE_URL = os.getenv("APP_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
 PUBLIC_WEB_URL = os.getenv("PUBLIC_WEB_URL", APP_BASE_URL).rstrip("/")
 
 # Bumped when frontend import/progress UI changes — visible in footer and browser console.
-UI_BUILD_TAG = "shared-dismiss-vue2-keys-fix-ui-2026-06-05"
+UI_BUILD_TAG = "invite-keep-open-retry-2026-09-15"
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")

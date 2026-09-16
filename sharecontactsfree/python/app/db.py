@@ -221,6 +221,33 @@ def list_recipient_emails() -> list[str]:
     return [normalize_email(str(row["email"])) for row in rows if str(row["email"] or "").strip()]
 
 
+def list_app_data_emails() -> list[str]:
+    with connect() as conn:
+        rows = conn.execute("SELECT email FROM app_data ORDER BY email").fetchall()
+    return [normalize_email(str(row["email"])) for row in rows if str(row["email"] or "").strip()]
+
+
+def update_shared_contacts_group_name(
+    owner: str, resource_name: str, new_name: str
+) -> int:
+    owner_key = normalize_email(owner)
+    group_resource = str(resource_name or "").strip()
+    group_name = str(new_name or "").strip()
+    if not owner_key or not group_resource or not group_name:
+        return 0
+    with connect() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE shared_contacts
+            SET group_name = ?
+            WHERE owner = ? AND group_resource_name = ?
+            """,
+            (group_name, owner_key, group_resource),
+        )
+        _commit(conn)
+    return int(cursor.rowcount or 0)
+
+
 def list_staged_share_groups_for_owner(owner: str) -> list[dict[str, Any]]:
     owner_key = normalize_email(owner)
     with connect() as conn:
