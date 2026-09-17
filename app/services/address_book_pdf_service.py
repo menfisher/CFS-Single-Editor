@@ -1317,6 +1317,34 @@ def _build_booklet_sheet_maps(total_pages: int) -> list[dict[str, list[int]]]:
     return sheets
 
 
+def _shift_page_x(page: _PdfPage, dx: float) -> None:
+    if abs(dx) < 0.01:
+        return
+    for line in page.lines:
+        line.x += dx
+    for rule in page.rules:
+        rule.x1 += dx
+        rule.x2 += dx
+    for image in page.images:
+        image.x += dx
+
+
+def _mirror_side_spiral_even_page_margins(
+    pages: list[_PdfPage], margin_left: float, margin_right: float
+) -> None:
+    """Keep the larger binding margin on the spiral edge after a leaf is turned.
+
+    Odd pages keep Left/Right as set. Even pages swap them so the extra gutter
+    sits on the bound edge (the right side of the verso).
+    """
+    dx = float(margin_right) - float(margin_left)
+    if abs(dx) < 0.01:
+        return
+    for index, page in enumerate(pages):
+        if index % 2 == 1:
+            _shift_page_x(page, dx)
+
+
 # Front (odd) sheets are left-flush. Back (even) sheets are right-flush so the
 # 4-up block registers through the paper after a long-edge duplex flip.
 
@@ -2247,6 +2275,8 @@ def build_address_book_pdf(
                 )
             cover_pages.append(cover_page)
         writer.pages = cover_pages + toc_pages + insert_pages + writer.pages + index_pages
+    if _clean(paper_book_binding).lower() == "side_spiral":
+        _mirror_side_spiral_even_page_margins(writer.pages, margin_left, margin_right)
     if _clean(paper_book_binding):
         writer.pages = _impose_pages_to_letter(writer.pages, paper_book_binding, font_family)
     return writer.bytes()

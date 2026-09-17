@@ -2,8 +2,13 @@
   "format": "contactsfreeshare.published_revisions.v1",
   "revisions": [
     {
-      "version": "1.222",
+      "version": "1.223",
+      "date_display": "9/17/2026",
+      "description": "Swap left and right margins on even pages for side-spiral paper books so the extra gutter stays on the bound edge."
+    },
+    {
       "date_display": "9/15/2026",
+      "version": "1.222",
       "description": "Rename the catch-all shared group in place from Save Settings."
     },
     {

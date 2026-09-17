@@ -1,10 +1,13 @@
 import unittest
 
 from app.services.address_book_pdf_service import (
+    _PdfLine,
     _PdfPage,
+    _PdfRule,
     _draw_cut_marks,
     _letter_block_offset_x,
     _letter_positions,
+    _mirror_side_spiral_even_page_margins,
 )
 
 
@@ -42,6 +45,22 @@ class AddressBookLetterImpositionTests(unittest.TestCase):
         self.assertIn(round(page_width * 2.0, 3), xs)
         self.assertEqual(_letter_positions(page_width, page_height, right_justify=False)[0][0], 0.0)
         self.assertIn(round(letter_height, 3), ys)
+
+    def test_even_pages_swap_side_spiral_left_and_right_margins(self) -> None:
+        margin_left = 0.3 * 72.0
+        margin_right = 0.2 * 72.0
+        odd = _PdfPage(3.5 * 72.0, 5.0 * 72.0)
+        odd.lines.append(_PdfLine("odd", x=margin_left, y=20.0, size=8.0))
+        odd.rules.append(_PdfRule(margin_left, 10.0, 200.0, 10.0))
+        even = _PdfPage(3.5 * 72.0, 5.0 * 72.0)
+        even.lines.append(_PdfLine("even", x=margin_left, y=20.0, size=8.0))
+        even.rules.append(_PdfRule(margin_left, 10.0, 200.0, 10.0))
+        _mirror_side_spiral_even_page_margins([odd, even], margin_left, margin_right)
+        self.assertAlmostEqual(odd.lines[0].x, margin_left)
+        self.assertAlmostEqual(odd.rules[0].x1, margin_left)
+        self.assertAlmostEqual(even.lines[0].x, margin_right)
+        self.assertAlmostEqual(even.rules[0].x1, margin_right)
+        self.assertAlmostEqual(even.rules[0].x2, 200.0 + (margin_right - margin_left))
 
 
 if __name__ == "__main__":
