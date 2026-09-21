@@ -2,8 +2,13 @@
   "format": "contactsfreeshare.published_revisions.v1",
   "revisions": [
     {
-      "version": "1.223",
+      "version": "1.225",
+      "date_display": "9/20/2026",
+      "description": "Show street address 2 on its own line on the contact card and in Google Contacts."
+    },
+    {
       "date_display": "9/17/2026",
+      "version": "1.223",
       "description": "Swap left and right margins on even pages for side-spiral paper books so the extra gutter stays on the bound edge."
     },
     {
