@@ -53,9 +53,17 @@ def build_formatted_address(
     region: str = "",
     postal_code: str = "",
 ) -> str:
-    street_block = build_street_block(street_address, extended_address)
+    """Contact card and Google Contacts: one line each for street, street 2, city."""
     city_line = build_city_line(city, region, postal_code)
-    return ", ".join(part for part in (street_block, city_line) if part)
+    return "\n".join(
+        part
+        for part in (
+            _clean(street_address),
+            _clean(extended_address),
+            city_line,
+        )
+        if part
+    )
 
 
 def parse_formatted_address(value: str) -> dict[str, str]:
