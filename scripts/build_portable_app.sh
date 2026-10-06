@@ -6,6 +6,7 @@ BUILD_DIR="$ROOT_DIR/dist"
 APP_DIR="$BUILD_DIR/ContactsFreeShare"
 WHEEL_DIR="$ROOT_DIR/vendor/wheels"
 PORTABLE_BUNDLE_REQUIREMENTS="$APP_DIR/requirements-portable-bundle.txt"
+BUNDLE_WHEELS="${CONTACTSFREESHARE_BUNDLE_WHEELS:-0}"
 BUNDLE_WHEEL_EXCLUDE_PACKAGES="${CONTACTSFREESHARE_BUNDLE_WHEEL_EXCLUDE_PACKAGES:-pymupdf}"
 
 remove_stale_update_manifests() {
@@ -20,7 +21,7 @@ rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR"
 remove_stale_update_manifests
 
-if [ -f "$ROOT_DIR/requirements.txt" ]; then
+if [ "$BUNDLE_WHEELS" != "0" ] && [ -f "$ROOT_DIR/requirements.txt" ]; then
   mkdir -p "$WHEEL_DIR"
   if ! ls "$WHEEL_DIR"/fastapi-*.whl >/dev/null 2>&1; then
     echo "Bundled Python dependency wheels are missing. Downloading them now..."
@@ -111,6 +112,7 @@ rsync -a \
   --exclude '/ShareContacts-App-Manual.*' \
   --exclude '/SELF_HOSTING_GUIDE.md' \
   --exclude '/vendor/python/' \
+  --exclude '/vendor/wheels/' \
   --exclude '/runtime/' \
   --exclude '/uploads/' \
   --exclude '/*.gs' \
@@ -767,20 +769,24 @@ if [ "$CLEAN_UPDATE_PACKAGES" != "0" ]; then
 fi
 if [ "$BUILD_MAC_PACKAGE" != "0" ]; then
   rm -f "$BUILD_DIR/$MAC_PACKAGE"
-  python3 "$ROOT_DIR/scripts/prune_vendor_wheels.py" \
-    --platform mac \
-    --source "$WHEEL_DIR" \
-    --dest "$APP_DIR/vendor/wheels" \
-    --exclude-package "$BUNDLE_WHEEL_EXCLUDE_PACKAGES"
+  if [ "$BUNDLE_WHEELS" != "0" ]; then
+    python3 "$ROOT_DIR/scripts/prune_vendor_wheels.py" \
+      --platform mac \
+      --source "$WHEEL_DIR" \
+      --dest "$APP_DIR/vendor/wheels" \
+      --exclude-package "$BUNDLE_WHEEL_EXCLUDE_PACKAGES"
+  fi
   (cd "$BUILD_DIR" && zip -qr "$MAC_PACKAGE" "ContactsFreeShare")
 fi
 if [ "$BUILD_WINDOWS_PACKAGE" != "0" ]; then
   rm -f "$BUILD_DIR/$WINDOWS_PACKAGE"
-  python3 "$ROOT_DIR/scripts/prune_vendor_wheels.py" \
-    --platform windows \
-    --source "$WHEEL_DIR" \
-    --dest "$APP_DIR/vendor/wheels" \
-    --exclude-package "$BUNDLE_WHEEL_EXCLUDE_PACKAGES"
+  if [ "$BUNDLE_WHEELS" != "0" ]; then
+    python3 "$ROOT_DIR/scripts/prune_vendor_wheels.py" \
+      --platform windows \
+      --source "$WHEEL_DIR" \
+      --dest "$APP_DIR/vendor/wheels" \
+      --exclude-package "$BUNDLE_WHEEL_EXCLUDE_PACKAGES"
+  fi
   (cd "$BUILD_DIR" && zip -qr "$WINDOWS_PACKAGE" "ContactsFreeShare")
 fi
 
