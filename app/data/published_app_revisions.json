@@ -2,8 +2,13 @@
   "format": "contactsfreeshare.published_revisions.v1",
   "revisions": [
     {
-      "version": "1.225",
+      "version": "1.226",
+      "date_display": "10/6/2026",
+      "description": "Keep a much smaller Drive list from wiping local contacts, and stop a blank Drive value from clearing meeting/elder codes. Street 1 and 2 print on separate lines, wrapping names keep a trailing comma, and Notes explains pb/ and pa/ print codes."
+    },
+    {
       "date_display": "9/20/2026",
+      "version": "1.225",
       "description": "Show street address 2 on its own line on the contact card and in Google Contacts."
     },
     {
