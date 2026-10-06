@@ -456,7 +456,12 @@
       </article>
 
       <article class="panel contact-edit-panel-notes">
-        <h3>Notes</h3>
+        <div class="contact-edit-notes-header">
+          <h3>Notes</h3>
+          <button type="button" class="contact-notes-info-button" id="contact-notes-info-button" aria-label="Notes print codes" title="Notes print codes">
+            <span aria-hidden="true">i</span>
+          </button>
+        </div>
         <div class="form-grid">
           <label>
             <span>Notes</span>
@@ -467,6 +472,21 @@
     </section>
 
   </form>
+
+  <dialog class="app-modal" id="contact-notes-info-modal" aria-labelledby="contact-notes-info-title">
+    <form method="dialog" class="app-modal-panel">
+      <div class="app-modal-header">
+        <h3 class="app-modal-title" id="contact-notes-info-title">Notes print codes</h3>
+        <p class="app-modal-copy">Additional info can be printed with the contact with these codes: <strong>pb/</strong> or <strong>pa/</strong>.</p>
+        <p class="app-modal-copy"><strong>pb/</strong> = print before address (same line as name if room)</p>
+        <p class="app-modal-copy"><strong>pa/</strong> = print after address</p>
+        <p class="app-modal-copy">Example: <code>pb/ Tom is son</code> will print (Tom is son) before the address lines.</p>
+      </div>
+      <div class="app-modal-actions">
+        <button type="submit" class="contact-card-button contact-card-button-edit" value="close">OK</button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog class="app-modal" id="assignment-option-modal">
     <form method="dialog" class="app-modal-panel" id="assignment-option-modal-form">
@@ -608,6 +628,11 @@
       const fieldSelect = document.getElementById("contact-edit-field");
       const meetingSelect = document.getElementById("contact-edit-meeting");
       const groupMembershipInput = document.getElementById("contact-edit-group-membership");
+      const notesInfoButton = document.getElementById("contact-notes-info-button");
+      const notesInfoModal = document.getElementById("contact-notes-info-modal");
+      notesInfoButton?.addEventListener("click", () => {
+        if (typeof notesInfoModal?.showModal === "function") notesInfoModal.showModal();
+      });
       const optionModal = document.getElementById("assignment-option-modal");
       const optionModalForm = document.getElementById("assignment-option-modal-form");
       const optionModalTitle = document.getElementById("assignment-option-modal-title");

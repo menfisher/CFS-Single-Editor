@@ -701,6 +701,57 @@ window.addEventListener("DOMContentLoaded", () => {
     return measureTextWidth(text, style) <= widthPx;
   };
 
+  const wrapFieldListNameWords = (text, widthPx) => {
+    const value = String(text || "").trim();
+    if (!value) return [];
+    if (textFitsWidth(value, widthPx, "normal")) return [value];
+    const words = value.split(/\s+/).filter(Boolean);
+    if (words.length <= 1) return [value];
+    const lines = [];
+    let current = words[0];
+    words.slice(1).forEach((word) => {
+      const candidate = `${current} ${word}`;
+      if (textFitsWidth(candidate, widthPx, "normal")) current = candidate;
+      else {
+        lines.push(current);
+        current = word;
+      }
+    });
+    if (current) lines.push(current);
+    return lines;
+  };
+
+  const wrapRelationshipText = (text, widthPx) => {
+    const value = String(text || "").trim();
+    if (!value) return [];
+    if (textFitsWidth(value, widthPx, "normal")) return [value];
+    const commaParts = value.split(",").map((part) => part.trim()).filter(Boolean);
+    if (commaParts.length > 1) {
+      const lines = [];
+      let current = "";
+      commaParts.forEach((part) => {
+        const candidate = current ? `${current}, ${part}` : part;
+        if (current && !textFitsWidth(candidate, widthPx, "normal")) {
+          lines.push(current.endsWith(",") ? current : `${current},`);
+          if (!textFitsWidth(part, widthPx, "normal")) {
+            lines.push(...wrapFieldListNameWords(part, widthPx));
+            current = "";
+          } else {
+            current = part;
+          }
+        } else if (!current && !textFitsWidth(part, widthPx, "normal")) {
+          lines.push(...wrapFieldListNameWords(part, widthPx));
+          current = "";
+        } else {
+          current = candidate;
+        }
+      });
+      if (current) lines.push(current);
+      if (lines.length) return lines;
+    }
+    return wrapFieldListNameWords(value, widthPx);
+  };
+
   const packTypedSuffixLines = (typedSegments, widthPx, { semicolonOnPreviousLine = false } = {}) => {
     if (!typedSegments.length) return [];
     const lines = [];
@@ -728,10 +779,16 @@ window.addEventListener("DOMContentLoaded", () => {
       if (current && !textFitsWidth(piece, widthPx, "normal")) {
         lines.push(current);
         isFirstSuffixLine = false;
-        current = kind === "child" ? `; ${text}` : ` ${text}`;
+        const nextText = kind === "child" ? `; ${text}` : ` ${text}`;
+        if (!textFitsWidth(nextText, widthPx, "normal")) {
+          lines.push(...wrapRelationshipText(nextText.trimStart(), widthPx));
+          current = "";
+        } else {
+          current = nextText;
+        }
       } else if (!current) {
         if (!textFitsWidth(piece, widthPx, "normal")) {
-          lines.push(piece);
+          lines.push(...wrapRelationshipText(piece.trimStart(), widthPx));
           isFirstSuffixLine = false;
           current = "";
         } else {
@@ -742,7 +799,13 @@ window.addEventListener("DOMContentLoaded", () => {
       }
     });
 
-    if (current) lines.push(current);
+    if (current) {
+      if (!textFitsWidth(current, widthPx, "normal")) {
+        lines.push(...wrapRelationshipText(current.trimStart(), widthPx));
+      } else {
+        lines.push(current);
+      }
+    }
     return lines;
   };
 
@@ -994,27 +1057,32 @@ window.addEventListener("DOMContentLoaded", () => {
 
   const formatFieldListAddressLines = (address, contact = null) => {
     const { street1, street2, city, text } = splitFieldListAddressParts(address);
-    const street = [street1, ...String(street2 || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean)]
-      .filter(Boolean)
-      .join(", ");
+    const street2Parts = String(street2 || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const streetParts = [street1, ...street2Parts].filter(Boolean);
     const widthPx = getTextColumnWidthPx(contact);
-    if (!street && !city) {
+    const withCity = (lines) => {
+      if (!city) return lines;
+      if (!lines.length) return wrapFieldListAddressText(city, widthPx);
+      const combined = `${lines[lines.length - 1]}, ${city}`;
+      if (textFitsWidth(combined, widthPx, "normal")) {
+        return [...lines.slice(0, -1), combined];
+      }
+      return [...lines, city];
+    };
+    if (!streetParts.length && !city) {
       const fallback = String(text || address || "").trim();
       return fallback ? wrapFieldListAddressText(fallback, widthPx) : [];
     }
-    if (!street) return wrapFieldListAddressText(city, widthPx);
+    if (!streetParts.length) return wrapFieldListAddressText(city, widthPx);
+    if (street1 && street2Parts.length) {
+      return withCity(streetParts.flatMap((part) => wrapFieldListAddressText(part, widthPx) || [part]));
+    }
+    const street = streetParts.join(", ");
     if (!city) return wrapFieldListAddressText(street, widthPx);
     const oneLine = `${street}, ${city}`;
     if (textFitsWidth(oneLine, widthPx, "normal")) return [oneLine];
     if (textFitsWidth(street, widthPx, "normal")) return [street, city];
-    const streetLines = wrapFieldListAddressText(street, widthPx);
-    if (streetLines.length) {
-      const combined = `${streetLines[streetLines.length - 1]}, ${city}`;
-      if (textFitsWidth(combined, widthPx, "normal")) {
-        return [...streetLines.slice(0, -1), combined];
-      }
-    }
-    return [...streetLines, city];
+    return withCity(wrapFieldListAddressText(street, widthPx));
   };
 
   const getContactAddressSource = (contact) => (

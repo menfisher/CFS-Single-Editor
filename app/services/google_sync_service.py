@@ -5948,6 +5948,18 @@ def export_shared_meetingdata_to_google_drive() -> None:
 
 
 _SHARED_CONTACT_DOWNLOAD_WORKERS = 8
+_LOCAL_CONTACT_PRUNE_GUARD_MIN_COUNT = 20
+
+
+def _drive_manifest_should_preserve_local_contacts(local_count: int, remote_count: int) -> bool:
+    """Keep a full local set when Drive looks empty, partial, or unexpectedly small."""
+    safe_local = max(int(local_count or 0), 0)
+    safe_remote = max(int(remote_count or 0), 0)
+    if safe_local <= 0:
+        return False
+    if safe_remote <= 0:
+        return True
+    return safe_local >= _LOCAL_CONTACT_PRUNE_GUARD_MIN_COUNT and safe_remote * 2 < safe_local
 
 
 def import_shared_contacts_from_google_drive(
@@ -5985,6 +5997,16 @@ def import_shared_contacts_from_google_drive(
         }
     payload = _drive_load_json_file_content(token, resolved_storage["contacts_current_file_id"])
     if isinstance(payload, dict) and payload.get("tables"):
+        backup_rows = (payload.get("tables") or {}).get("contacts") or []
+        backup_count = len(backup_rows) if isinstance(backup_rows, list) else 0
+        if _drive_manifest_should_preserve_local_contacts(local_contact_count, backup_count):
+            _LOGGER.warning(
+                "Skipped Drive contacts backup restore because the remote set is much smaller "
+                "than local (%s vs %s).",
+                backup_count,
+                local_contact_count,
+            )
+            return True
         restore_contacts_backup_payload(payload, restore_files=False)
         if remote_contacts_revision > 0:
             _store_local_sync_revisions(contacts_sync_revision=remote_contacts_revision)
@@ -6032,6 +6054,13 @@ def import_shared_contacts_from_google_drive(
         )
     ]
     removed_contact_ids = set(local_revision_by_id) - remote_ids
+    if _drive_manifest_should_preserve_local_contacts(local_contact_count, len(remote_contacts)):
+        _LOGGER.warning(
+            "Keeping %s local contacts instead of adopting a much smaller Drive list (%s).",
+            local_contact_count,
+            len(remote_contacts),
+        )
+        removed_contact_ids = set()
 
     # Fast path: dataset revision differed, but no per-contact Drive-ahead work and no
     # removals. Adopt the remote dataset revision without listing/downloading records.
@@ -6384,6 +6413,12 @@ def _find_contact_photo_file_on_drive(
     return "", ""
 
 
+def _coalesce_mtg_home_elder_flag(local_value: object, remote_value: object) -> str:
+    """Keep a filled local 1/2 when Drive has a blank meeting-home/elder code."""
+    remote = _clean(remote_value)
+    return remote or _clean(local_value)
+
+
 def _apply_shared_contact_app_fields(
     local_row: dict,
     remote_row: dict,
@@ -6395,7 +6430,10 @@ def _apply_shared_contact_app_fields(
     local_google_contact_id = _clean(local_row.get("google_contact_id"))
     if google_contact_id and local_google_contact_id and google_contact_id != local_google_contact_id:
         return False
-    mtg_home_elder_flag = _clean(remote_row.get("mtg_home_elder_flag"))
+    mtg_home_elder_flag = _coalesce_mtg_home_elder_flag(
+        local_row.get("mtg_home_elder_flag"),
+        remote_row.get("mtg_home_elder_flag"),
+    )
     birthday = _clean(remote_row.get("birthday"))
     remote_photo = _clean_contact_photo_path(remote_row.get("photo"))
     remote_drive_id = _clean(remote_row.get("photo_drive_file_id"))
@@ -6451,7 +6489,7 @@ def _shared_contact_app_fields_stale(local_row: dict, remote_row: dict, remote_r
         return True
     local_mtg = _clean(local_row.get("mtg_home_elder_flag"))
     remote_mtg = _clean(remote_row.get("mtg_home_elder_flag"))
-    if remote_mtg != local_mtg:
+    if remote_mtg and remote_mtg != local_mtg:
         return True
     local_birthday = _clean(local_row.get("birthday"))
     remote_birthday = _clean(remote_row.get("birthday"))

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   {% include "includes/mobile_head.html" %}
   <title>Edit {{ contact.family_name }}{% if contact.given_name %}, {{ contact.given_name }}{% endif %}</title>
-  <link rel="stylesheet" href="/static/css/mobile.css?v=45">
+  <link rel="stylesheet" href="/static/css/mobile.css?v=46">
 </head>
 <body class="mobile-shell mobile-edit-page">
   {% include "includes/mobile_busy_modal.html" %}
@@ -366,7 +366,12 @@
     </section>
 
     <section class="mobile-panel mobile-edit-section">
-      <h2>Notes</h2>
+      <div class="mobile-edit-section-header">
+        <h2>Notes</h2>
+        <button type="button" class="contact-notes-info-button" id="contact-notes-info-button" aria-label="Notes print codes" title="Notes print codes">
+          <span aria-hidden="true">i</span>
+        </button>
+      </div>
       <label class="mobile-edit-field">
         <span class="mobile-edit-label">Notes</span>
         <textarea name="notes" rows="4" data-autogrow>{{ contact.notes or '' }}</textarea>
@@ -413,6 +418,19 @@
   </div>
 
   {% include "includes/mobile_assignment_modal.html" %}
+
+  <dialog class="mobile-assignment-modal" id="contact-notes-info-modal" aria-labelledby="contact-notes-info-title">
+    <form method="dialog" class="mobile-assignment-modal-panel">
+      <h2 class="mobile-assignment-modal-title" id="contact-notes-info-title">Notes print codes</h2>
+      <p class="mobile-assignment-modal-copy">Additional info can be printed with the contact with these codes: <strong>pb/</strong> or <strong>pa/</strong>.</p>
+      <p class="mobile-assignment-modal-copy"><strong>pb/</strong> = print before address (same line as name if room)</p>
+      <p class="mobile-assignment-modal-copy"><strong>pa/</strong> = print after address</p>
+      <p class="mobile-assignment-modal-copy">Example: <code>pb/ Tom is son</code> will print (Tom is son) before the address lines.</p>
+      <div class="mobile-assignment-modal-actions">
+        <button type="submit" class="mobile-button" value="close">OK</button>
+      </div>
+    </form>
+  </dialog>
 
   <div class="mobile-app-footer mobile-edit-actions">
     <a class="mobile-button mobile-button-secondary" href="{{ detail_url }}">Cancel</a>
@@ -606,6 +624,10 @@
     }
 
     window.addEventListener("DOMContentLoaded", () => {
+      document.getElementById("contact-notes-info-button")?.addEventListener("click", () => {
+        const notesInfoModal = document.getElementById("contact-notes-info-modal");
+        if (typeof notesInfoModal?.showModal === "function") notesInfoModal.showModal();
+      });
       const editForm = document.querySelector(".mobile-edit-form");
       const fieldSelect = document.getElementById("mobile-edit-field");
       const meetingSelect = document.getElementById("mobile-edit-meeting");

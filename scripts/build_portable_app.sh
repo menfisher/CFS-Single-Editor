@@ -8,8 +8,17 @@ WHEEL_DIR="$ROOT_DIR/vendor/wheels"
 PORTABLE_BUNDLE_REQUIREMENTS="$APP_DIR/requirements-portable-bundle.txt"
 BUNDLE_WHEEL_EXCLUDE_PACKAGES="${CONTACTSFREESHARE_BUNDLE_WHEEL_EXCLUDE_PACKAGES:-pymupdf}"
 
+remove_stale_update_manifests() {
+  # Google Drive/iCloud leave copies like "app_update_manifest [conflicted 2].json".
+  find "$BUILD_DIR" -maxdepth 1 -type f -name 'app_update_manifest*conflicted*.json' -delete
+  if [ "${1:-}" = "all" ]; then
+    rm -f "$BUILD_DIR/app_update_manifest.json"
+  fi
+}
+
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR"
+remove_stale_update_manifests
 
 if [ -f "$ROOT_DIR/requirements.txt" ]; then
   mkdir -p "$WHEEL_DIR"
@@ -464,6 +473,7 @@ call :find_compatible_python
 if "%PYTHON_CMD%"=="" (
   echo Python 3.12 or newer was not found on this computer.
   echo Checked common locations such as:
+  echo   %LOCALAPPDATA%\Python\pythoncore-3.14-64\python.exe
   echo   %LOCALAPPDATA%\Programs\Python\Python313\python.exe
   echo   %ProgramFiles%\Python313\python.exe
   set "INSTALLER_DIR=runtime\python-installers"
@@ -618,6 +628,11 @@ exit /b 0
 :find_compatible_python
 set "PYTHON_CMD="
 
+for /f "delims=" %%D in ('dir /b /ad /o-n "%LOCALAPPDATA%\Python\pythoncore-3*" 2^>nul') do (
+  if not defined PYTHON_CMD call :try_python_exe "%LOCALAPPDATA%\Python\%%D\python.exe"
+)
+if not defined PYTHON_CMD call :try_python_exe "%LOCALAPPDATA%\Python\bin\python.exe"
+
 for /f "delims=" %%D in ('dir /b /ad /o-n "%LOCALAPPDATA%\Programs\Python\Python3*" 2^>nul') do (
   if not defined PYTHON_CMD call :try_python_exe "%LOCALAPPDATA%\Programs\Python\%%D\python.exe"
 )
@@ -748,7 +763,7 @@ if [ "$CLEAN_UPDATE_PACKAGES" != "0" ]; then
   if [ "$BUILD_WINDOWS_PACKAGE" != "0" ]; then
     find "$BUILD_DIR" -maxdepth 1 -type f -name 'ContactsFreeShare-*-windows.zip' -delete
   fi
-  rm -f "$BUILD_DIR/app_update_manifest.json"
+  remove_stale_update_manifests all
 fi
 if [ "$BUILD_MAC_PACKAGE" != "0" ]; then
   rm -f "$BUILD_DIR/$MAC_PACKAGE"

@@ -30,7 +30,7 @@ class AddressDisplayLinesTests(unittest.TestCase):
             "Riverwalk Senior's Living\n50001 Old Montgomery Hwy #204\nTuscaloosa, AL 35005",
         )
 
-    def test_street_and_unit_prefer_one_line_with_city(self) -> None:
+    def test_street_and_unit_print_on_separate_lines(self) -> None:
         lines = address_display_lines(
             street_address="2130 E McNeese St",
             extended_address="#11",
@@ -38,7 +38,7 @@ class AddressDisplayLinesTests(unittest.TestCase):
             region="LA",
             postal_code="70607",
         )
-        self.assertEqual(lines, ["2130 E McNeese St, #11, Lake Charles, LA 70607"])
+        self.assertEqual(lines, ["2130 E McNeese St", "#11, Lake Charles, LA 70607"])
 
     def test_wrap_keeps_street_and_unit_together(self) -> None:
         lines = address_display_lines(
@@ -47,13 +47,13 @@ class AddressDisplayLinesTests(unittest.TestCase):
             city="Lake Charles",
             region="LA",
             postal_code="70607",
-            # Wide enough for street+#11 (22 chars), not the full address (46).
+            # Wide enough for street 1, not street 2 + city.
             max_width=130,
             text_width=lambda text: float(len(text) * 5),
         )
         self.assertEqual(
             lines,
-            ["2130 E McNeese St, #11", "Lake Charles, LA 70607"],
+            ["2130 E McNeese St", "#11", "Lake Charles, LA 70607"],
         )
 
     def test_single_street_wraps_city_only(self) -> None:
@@ -80,7 +80,7 @@ class AddressDisplayLinesTests(unittest.TestCase):
         self.assertEqual(
             lines,
             [
-                "Regency Retirement Village of Tuscaloosa,",
+                "Regency Retirement Village of Tuscaloosa",
                 "5001 Old Montgomery Hwy #204",
                 "Tuscaloosa, AL 35405",
             ],

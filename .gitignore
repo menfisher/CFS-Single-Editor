@@ -15,6 +15,7 @@ dist/.DS_Store
 dist/ContactsFreeShare*/
 dist/*.zip
 dist/app_update_manifest.json
+dist/app_update_manifest*conflicted*.json
 vendor/python/
 vendor/wheels/*.whl
 contactsfreeshare-site/

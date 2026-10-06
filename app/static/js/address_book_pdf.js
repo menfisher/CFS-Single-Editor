@@ -349,6 +349,57 @@ function addressBookPdfContactNameMaxWidthPx(printableWidthPx, fontSizePx, fontF
   return Math.max(120, printableWidthPx - phoneColumnWidth);
 }
 
+function wrapAddressBookPdfNameWords(text, measureWidth, maxWidth) {
+  const value = String(text || "").trim();
+  if (!value) return [];
+  if (measureWidth(value) <= maxWidth) return [value];
+  const words = value.split(/\s+/).filter(Boolean);
+  if (words.length <= 1) return [value];
+  const lines = [];
+  let current = words[0];
+  words.slice(1).forEach((word) => {
+    const candidate = `${current} ${word}`;
+    if (measureWidth(candidate) <= maxWidth) current = candidate;
+    else {
+      lines.push(current);
+      current = word;
+    }
+  });
+  if (current) lines.push(current);
+  return lines;
+}
+
+function wrapAddressBookPdfRelationshipText(text, measureWidth, maxWidth) {
+  const value = String(text || "").trim();
+  if (!value) return [];
+  if (measureWidth(value) <= maxWidth) return [value];
+  const commaParts = value.split(",").map((part) => part.trim()).filter(Boolean);
+  if (commaParts.length > 1) {
+    const lines = [];
+    let current = "";
+    commaParts.forEach((part) => {
+      const candidate = current ? `${current}, ${part}` : part;
+      if (current && measureWidth(candidate) > maxWidth) {
+        lines.push(current.endsWith(",") ? current : `${current},`);
+        if (measureWidth(part) > maxWidth) {
+          lines.push(...wrapAddressBookPdfNameWords(part, measureWidth, maxWidth));
+          current = "";
+        } else {
+          current = part;
+        }
+      } else if (!current && measureWidth(part) > maxWidth) {
+        lines.push(...wrapAddressBookPdfNameWords(part, measureWidth, maxWidth));
+        current = "";
+      } else {
+        current = candidate;
+      }
+    });
+    if (current) lines.push(current);
+    if (lines.length) return lines;
+  }
+  return wrapAddressBookPdfNameWords(value, measureWidth, maxWidth);
+}
+
 function packTypedSuffixLinesForAddressBookPdf(
   typedSegments,
   measureWidth,
@@ -381,10 +432,16 @@ function packTypedSuffixLinesForAddressBookPdf(
     if (current && measureWidth(piece) > maxWidth) {
       lines.push(current);
       isFirstSuffixLine = false;
-      current = kind === "child" ? `; ${text}` : ` ${text}`;
+      const nextText = kind === "child" ? `; ${text}` : ` ${text}`;
+      if (measureWidth(nextText) > maxWidth) {
+        lines.push(...wrapAddressBookPdfRelationshipText(nextText.trimStart(), measureWidth, maxWidth));
+        current = "";
+      } else {
+        current = nextText;
+      }
     } else if (!current) {
       if (measureWidth(piece) > maxWidth) {
-        lines.push(piece);
+        lines.push(...wrapAddressBookPdfRelationshipText(piece.trimStart(), measureWidth, maxWidth));
         isFirstSuffixLine = false;
         current = "";
       } else {
@@ -395,7 +452,13 @@ function packTypedSuffixLinesForAddressBookPdf(
     }
   });
 
-  if (current) lines.push(current);
+  if (current) {
+    if (measureWidth(current) > maxWidth) {
+      lines.push(...wrapAddressBookPdfRelationshipText(current.trimStart(), measureWidth, maxWidth));
+    } else {
+      lines.push(current);
+    }
+  }
   return lines;
 }
 
@@ -540,21 +603,31 @@ function addressBookPdfAddressDisplayLines(address, maxWidthPx = null, fontSizeP
     if (!city) city = parsed.city;
   }
 
-  const streetParts = [street1, ...street2.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)].filter(Boolean);
-  const street = streetParts.join(", ");
-  if (!street && !city) {
+  const street2Parts = street2.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const streetParts = [street1, ...street2Parts].filter(Boolean);
+  const wrap = (value) => (
+    (maxWidthPx != null && maxWidthPx > 0)
+      ? addressBookPdfWrapAddressText(value, maxWidthPx, fontSizePx, fontFamily)
+      : [value]
+  );
+  const withCity = (lines) => {
+    if (!city) return lines;
+    if (!lines.length) return wrap(city);
+    const combined = `${lines[lines.length - 1]}, ${city}`;
+    if (maxWidthPx == null || !(maxWidthPx > 0) || measureAddressBookPdfTextWidth(combined, fontSizePx, fontFamily) <= maxWidthPx) {
+      return [...lines.slice(0, -1), combined];
+    }
+    return [...lines, city];
+  };
+  if (!streetParts.length && !city) {
     return text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   }
-  if (!street) {
-    return (maxWidthPx != null && maxWidthPx > 0)
-      ? addressBookPdfWrapAddressText(city, maxWidthPx, fontSizePx, fontFamily)
-      : [city];
+  if (!streetParts.length) return wrap(city);
+  if (street1 && street2Parts.length) {
+    return withCity(streetParts.flatMap((part) => wrap(part) || [part]));
   }
-  if (!city) {
-    return (maxWidthPx != null && maxWidthPx > 0)
-      ? addressBookPdfWrapAddressText(street, maxWidthPx, fontSizePx, fontFamily)
-      : [street];
-  }
+  const street = streetParts.join(", ");
+  if (!city) return wrap(street);
   const oneLine = `${street}, ${city}`;
   if (maxWidthPx == null || !(maxWidthPx > 0)) {
     return [oneLine];
@@ -565,14 +638,7 @@ function addressBookPdfAddressDisplayLines(address, maxWidthPx = null, fontSizeP
   if (measureAddressBookPdfTextWidth(street, fontSizePx, fontFamily) <= maxWidthPx) {
     return [street, city];
   }
-  const streetLines = addressBookPdfWrapAddressText(street, maxWidthPx, fontSizePx, fontFamily);
-  if (streetLines.length) {
-    const combined = `${streetLines[streetLines.length - 1]}, ${city}`;
-    if (measureAddressBookPdfTextWidth(combined, fontSizePx, fontFamily) <= maxWidthPx) {
-      return [...streetLines.slice(0, -1), combined];
-    }
-  }
-  return [...streetLines, city];
+  return withCity(addressBookPdfWrapAddressText(street, maxWidthPx, fontSizePx, fontFamily));
 }
 
 function addressBookPdfAddressEntry(address) {

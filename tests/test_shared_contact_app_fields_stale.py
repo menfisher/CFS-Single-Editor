@@ -1,8 +1,7 @@
 import unittest
-from unittest.mock import patch
 
 from app.services.google_sync_service import (
-    _find_shared_contact_manifest_item,
+    _coalesce_mtg_home_elder_flag,
     _shared_contact_app_fields_stale,
 )
 
@@ -49,23 +48,23 @@ class SharedContactAppFieldsStaleTests(unittest.TestCase):
         }
         self.assertFalse(_shared_contact_app_fields_stale(local_row, remote_row, 5))
 
+    def test_different_nonblank_remote_mtg_is_stale(self) -> None:
+        local_row = {"shared_drive_revision": 5, "mtg_home_elder_flag": "1", "birthday": ""}
+        remote_row = {"mtg_home_elder_flag": "2", "birthday": ""}
+        self.assertTrue(_shared_contact_app_fields_stale(local_row, remote_row, 5))
 
-class FindSharedContactManifestItemTests(unittest.TestCase):
-    def test_matches_manifest_entry_by_contact_id_first(self) -> None:
-        local_row = {"id": 42, "family_name": "Anderson", "given_name": "Jason"}
-        manifest_entries = [
-            {"id": 99, "family_name": "Other", "given_name": "Person"},
-            {"id": 42, "family_name": "Anderson", "given_name": "Jason"},
-        ]
-        with patch("app.services.google_sync_service._load_shared_contact_row_from_drive") as load_row:
-            matched = _find_shared_contact_manifest_item(
-                "token",
-                {"contact_records_folder_id": "folder"},
-                local_row,
-                manifest_entries,
-            )
-        self.assertEqual(int(matched["id"]), 42)
-        load_row.assert_not_called()
+
+class CoalesceMtgHomeElderFlagTests(unittest.TestCase):
+    def test_blank_remote_keeps_local(self) -> None:
+        self.assertEqual(_coalesce_mtg_home_elder_flag("1", ""), "1")
+        self.assertEqual(_coalesce_mtg_home_elder_flag("2", None), "2")
+
+    def test_nonblank_remote_wins(self) -> None:
+        self.assertEqual(_coalesce_mtg_home_elder_flag("1", "2"), "2")
+        self.assertEqual(_coalesce_mtg_home_elder_flag("", "1"), "1")
+
+    def test_both_blank_stays_blank(self) -> None:
+        self.assertEqual(_coalesce_mtg_home_elder_flag("", ""), "")
 
 
 if __name__ == "__main__":

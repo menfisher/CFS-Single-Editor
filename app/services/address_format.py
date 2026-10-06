@@ -286,6 +286,17 @@ def _wrap_address_text_to_width(
     return _wrap_address_words(value, fits=fits)
 
 
+def _with_city_line(street_lines: list[str], city_line: str, fits) -> list[str]:
+    if not city_line:
+        return street_lines
+    if not street_lines:
+        return _wrap_address_text_to_width(city_line, fits=fits)
+    combined = f"{street_lines[-1]}, {city_line}"
+    if fits(combined):
+        return [*street_lines[:-1], combined]
+    return [*street_lines, city_line]
+
+
 def address_display_lines(
     value: str = "",
     *,
@@ -299,10 +310,10 @@ def address_display_lines(
 ) -> list[str]:
     """Print lines for address book / field list.
 
-    Prefer one line: street, unit/apt, city, state ZIP.
-    If that is too wide, keep street + unit together when possible and put
-    city/state/ZIP on the next line. Long street blocks wrap at commas so
-    lines stay inside the name/address column (never under the phone gap).
+    Street address 1 and street address 2 stay on separate lines when both
+    are filled. With only one street line, prefer street + city on one line;
+    if that is too wide, put city/state/ZIP on the next line. Long street
+    blocks wrap at commas so lines stay inside the name/address column.
     """
     def _fits(line: str) -> bool:
         if max_width is None or text_width is None:
@@ -323,26 +334,27 @@ def address_display_lines(
     street1 = _clean(enriched["street_address"])
     street2 = _clean(str(enriched["extended_address"] or "").replace("\r", "\n"))
     street2_parts = [part.strip() for part in street2.split("\n") if part.strip()]
-    street_block = ", ".join(part for part in [street1, *street2_parts] if part)
+    street_segments = [part for part in [street1, *street2_parts] if part]
     city_line = build_city_line(enriched["city"], enriched["region"], enriched["postal_code"])
 
-    if not street_block and not city_line:
+    if not street_segments and not city_line:
         return []
-    if not street_block:
+    if not street_segments:
         return _wrap_address_text_to_width(city_line, fits=_fits)
+
+    if street1 and street2_parts:
+        lines: list[str] = []
+        for segment in street_segments:
+            lines.extend(_wrap_address_text_to_width(segment, fits=_fits) or [segment])
+        return _with_city_line(lines, city_line, _fits)
+
+    street_block = ", ".join(street_segments)
     if not city_line:
         return _wrap_address_text_to_width(street_block, fits=_fits)
 
     one_line = f"{street_block}, {city_line}"
     if _fits(one_line):
         return [one_line]
-
     if _fits(street_block):
         return [street_block, city_line]
-
-    street_lines = _wrap_address_text_to_width(street_block, fits=_fits)
-    if street_lines:
-        combined = f"{street_lines[-1]}, {city_line}"
-        if _fits(combined):
-            return [*street_lines[:-1], combined]
-    return [*street_lines, city_line]
+    return _with_city_line(_wrap_address_text_to_width(street_block, fits=_fits), city_line, _fits)

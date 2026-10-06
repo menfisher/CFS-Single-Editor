@@ -1270,7 +1270,8 @@ def _wrap_relationship_text(text: str, measure_width, max_width: float) -> list[
         for part in comma_parts:
             candidate = part if not current else f"{current}, {part}"
             if current and measure_width(candidate) > max_width:
-                lines.append(current)
+                wrapped_line = current if current.endswith(",") else f"{current},"
+                lines.append(wrapped_line)
                 if measure_width(part) > max_width:
                     lines.extend(_wrap_text_by_words(part, measure_width, max_width))
                     current = ""

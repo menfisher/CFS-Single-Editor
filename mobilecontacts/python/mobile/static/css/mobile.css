@@ -999,6 +999,33 @@ body.mobile-nav-shell .mobile-bottom-nav-footer .mobile-bottom-nav {
   margin: 0;
 }
 
+.contact-notes-info-button {
+  appearance: none;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1.5px solid #5a6470;
+  border-radius: 50%;
+  background: #fff;
+  color: #5a6470;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 0.95rem;
+  font-style: italic;
+  font-weight: 700;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.contact-notes-info-button:hover,
+.contact-notes-info-button:focus-visible {
+  color: #155e63;
+  border-color: #155e63;
+  outline: none;
+}
+
 .mobile-edit-fields {
   display: grid;
   gap: 10px;
@@ -1156,6 +1183,10 @@ body.mobile-nav-shell .mobile-bottom-nav-footer .mobile-bottom-nav {
   color: #5a6470;
   font-size: 0.92rem;
   line-height: 1.4;
+}
+
+#contact-notes-info-modal .mobile-assignment-modal-copy + .mobile-assignment-modal-copy {
+  margin-top: 8px;
 }
 
 .mobile-assignment-modal-field {
