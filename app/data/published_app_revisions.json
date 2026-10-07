@@ -2,8 +2,13 @@
   "format": "contactsfreeshare.published_revisions.v1",
   "revisions": [
     {
-      "version": "1.226",
+      "version": "1.227",
       "date_display": "10/6/2026",
+      "description": "Keep Husband and Wife labels through Google sync instead of importing Other. Address Book print includes Meeting Data. Addresses stay in the name column, the contacts page has a Notes column and a fitted toolbar, and pa/pb notes use the book font."
+    },
+    {
+      "date_display": "10/6/2026",
+      "version": "1.226",
       "description": "Keep a much smaller Drive list from wiping local contacts, and stop a blank Drive value from clearing meeting/elder codes. Street 1 and 2 print on separate lines, wrapping names keep a trailing comma, and Notes explains pb/ and pa/ print codes."
     },
     {
