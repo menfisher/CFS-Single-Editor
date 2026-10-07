@@ -2,8 +2,13 @@
   "format": "contactsfreeshare.published_revisions.v1",
   "revisions": [
     {
-      "version": "1.228",
+      "version": "1.237",
       "date_display": "10/7/2026",
+      "description": "Place the address book insert before the table of contents without counting it as a numbered page. Paper books can turn cut marks on or off. Inserted PDFs print at 600 dpi from the original file instead of a soft JPEG. Version number matches Multi-Editor 1.237."
+    },
+    {
+      "date_display": "10/7/2026",
+      "version": "1.228",
       "description": "Place the address book insert before the table of contents without counting it as a numbered page. Paper books can turn cut marks on or off. Inserted PDFs print at 600 dpi from the original file instead of a soft JPEG."
     },
     {
