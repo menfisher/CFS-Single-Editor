@@ -962,15 +962,36 @@ window.addEventListener("DOMContentLoaded", () => {
     `;
   };
 
+  const splitFieldListTypePrefix = (text) => {
+    const value = String(text || "");
+    if (!value.trim()) return { label: "", remainder: "" };
+    const lines = value.replace(/\r\n/g, "\n").split("\n");
+    const match = String(lines[0] || "").trim().match(/^([A-Za-z][A-Za-z0-9 /._-]{0,19}):\s*(.*)$/);
+    if (!match) return { label: "", remainder: value.trim() };
+    const remainderLines = [match[2].trim(), ...lines.slice(1)];
+    return {
+      label: match[1].trim(),
+      remainder: remainderLines.filter((line, index) => line || index === 0).join("\n").trim(),
+    };
+  };
+
   const splitFieldListAddressParts = (address) => {
     const entry = (address && typeof address === "object") ? address : { text: address };
+    const parsedPrefix = splitFieldListTypePrefix(String(entry.text || address || "").trim());
+    let addressLabel = String(entry.address_type || "").trim();
+    if (!addressLabel) addressLabel = parsedPrefix.label;
+    if (addressLabel.toLowerCase() === "home") addressLabel = "";
     let street1 = String(entry.street_address || "").trim();
+    const street1Prefix = splitFieldListTypePrefix(street1);
+    if (street1Prefix.label && (!addressLabel || street1Prefix.label.toLowerCase() === addressLabel.toLowerCase())) {
+      street1 = street1Prefix.remainder;
+    }
     let street2 = String(entry.extended_address || "").trim();
     let city = "";
     if (entry.city && entry.region && entry.postal_code) {
       city = `${String(entry.city).trim()}, ${String(entry.region).trim()} ${String(entry.postal_code).trim()}`;
     }
-    const text = String(entry.text || address || "").trim();
+    const text = parsedPrefix.remainder;
     if (!street1 && !street2) {
       const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
       const cityLineRe = /^(.+?),\s*([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/;
@@ -996,18 +1017,22 @@ window.addEventListener("DOMContentLoaded", () => {
         street1 = street;
       }
     }
-    return { street1, street2, city, text };
+    return { street1, street2, city, text, addressLabel };
   };
 
   const formatFieldListAddressOneLine = (address) => {
-    const { street1, street2, city, text } = splitFieldListAddressParts(address);
+    const { street1, street2, city, text, addressLabel } = splitFieldListAddressParts(address);
+    const prefix = addressLabel ? `${addressLabel}: ` : "";
     const street = [street1, street2].filter(Boolean).join(", ");
-    if (street && city) return `${street}, ${city}`;
-    return String(text || address || "")
+    if (street && city) return `${prefix}${street}, ${city}`;
+    const fallback = String(text || address || "")
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter(Boolean)
       .join(", ");
+    return prefix && fallback && !fallback.toLowerCase().startsWith(prefix.toLowerCase())
+      ? `${prefix}${fallback}`
+      : fallback;
   };
 
   const isFieldListUnitOrAptPart = (part) => (
@@ -1062,10 +1087,18 @@ window.addEventListener("DOMContentLoaded", () => {
   };
 
   const formatFieldListAddressLines = (address, contact = null) => {
-    const { street1, street2, city, text } = splitFieldListAddressParts(address);
+    const { street1, street2, city, text, addressLabel } = splitFieldListAddressParts(address);
+    const prefix = addressLabel ? `${addressLabel}: ` : "";
     const street2Parts = String(street2 || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     const streetParts = [street1, ...street2Parts].filter(Boolean);
     const widthPx = getTextColumnWidthPx(contact);
+    const withPrefix = (line) => {
+      if (!prefix || !line) return line;
+      if (String(line).toLowerCase().startsWith(prefix.toLowerCase())) return line;
+      return `${prefix}${line}`;
+    };
+    const fitsFirst = (line) => textFitsWidth(withPrefix(line), widthPx, "normal");
+    const applyPrefix = (lines) => (prefix && lines.length ? [withPrefix(lines[0]), ...lines.slice(1)] : lines);
     const withCity = (lines) => {
       if (!city) return lines;
       if (!lines.length) return wrapFieldListAddressText(city, widthPx);
@@ -1077,18 +1110,21 @@ window.addEventListener("DOMContentLoaded", () => {
     };
     if (!streetParts.length && !city) {
       const fallback = String(text || address || "").trim();
-      return fallback ? wrapFieldListAddressText(fallback, widthPx) : [];
+      return fallback ? applyPrefix(wrapFieldListAddressText(fallback, widthPx)) : [];
     }
-    if (!streetParts.length) return wrapFieldListAddressText(city, widthPx);
+    if (!streetParts.length) return applyPrefix(wrapFieldListAddressText(city, widthPx));
     if (street1 && street2Parts.length) {
-      return withCity(streetParts.flatMap((part) => wrapFieldListAddressText(part, widthPx) || [part]));
+      return applyPrefix(withCity([
+        ...wrapFieldListAddressText(street1, widthPx),
+        ...street2Parts.flatMap((part) => wrapFieldListAddressText(part, widthPx) || [part]),
+      ]));
     }
     const street = streetParts.join(", ");
-    if (!city) return wrapFieldListAddressText(street, widthPx);
+    if (!city) return applyPrefix(wrapFieldListAddressText(street, widthPx));
     const oneLine = `${street}, ${city}`;
-    if (textFitsWidth(oneLine, widthPx, "normal")) return [oneLine];
-    if (textFitsWidth(street, widthPx, "normal")) return [street, city];
-    return withCity(wrapFieldListAddressText(street, widthPx));
+    if (fitsFirst(oneLine)) return [withPrefix(oneLine)];
+    if (fitsFirst(street)) return [withPrefix(street), city];
+    return applyPrefix(withCity(wrapFieldListAddressText(street, widthPx)));
   };
 
   const getContactAddressSource = (contact) => (
@@ -1101,9 +1137,7 @@ window.addEventListener("DOMContentLoaded", () => {
     .flatMap((address) => formatFieldListAddressLines(address, contact))
     .filter(Boolean);
 
-  const getCompactAddressLines = (contact) => getContactAddressSource(contact)
-    .map((address) => formatFieldListAddressOneLine(address))
-    .filter(Boolean);
+  const getCompactAddressLines = (contact) => getContactAddressLines(contact);
 
   const estimateContactLineCount = (contact) => {
     const phoneCount = Math.max(1, (contact?.phones || []).length);
