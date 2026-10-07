@@ -198,6 +198,7 @@
             <th class="contacts-col-meetings">Meetings</th>
             <th class="contacts-col-phones">Phones</th>
             <th class="contacts-col-addresses">Addresses</th>
+            <th class="contacts-col-notes">Notes</th>
           </tr>
         </thead>
         <tbody>
@@ -222,10 +223,11 @@
               <td class="preserve-breaks contacts-col-meetings">{{ contact.meetings_text }}</td>
               <td class="preserve-breaks small-text contacts-col-phones">{{ contact.phone_summary or "" }}</td>
               <td class="preserve-breaks small-text contacts-col-addresses">{{ contact.address_summary or "" }}</td>
+              <td class="preserve-breaks small-text contacts-col-notes">{{ contact.notes or "" }}</td>
             </tr>
           {% else %}
             <tr>
-              <td colspan="5">No contacts found.</td>
+              <td colspan="6">No contacts found.</td>
             </tr>
           {% endfor %}
         </tbody>

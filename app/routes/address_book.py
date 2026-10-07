@@ -185,6 +185,17 @@ def _address_book_pdf_settings_from_form(form) -> dict:
     }
 
 
+def _address_book_pdf_print_settings(form) -> dict:
+    """Address Book PDF always includes Meeting Data after each meeting.
+
+    The Field List page has its own checkbox for that block. The Address Book
+    page does not, so a Field List import must not hide Meeting Data here.
+    """
+    values = _address_book_pdf_settings_from_form(form)
+    values["include_bible_study_union_info"] = 1
+    return save_address_book_settings(values)
+
+
 def _address_book_pdf_cover_options_from_form(form) -> dict:
     return {
         "cover_image_data": str(form.get("cover_image_data") or "") if str(form.get("include_cover_image") or "") == "1" else "",
@@ -257,19 +268,40 @@ def _address_book_pdf_contact_preview(contact: dict) -> dict:
             address_text = address.get("text")
             coordinates = str(address.get("coordinates") or "").strip()
             has_coordinates = bool(address.get("has_coordinates") or coordinates)
+            entry = {
+                "text": "\n".join(line.strip() for line in str(address_text or "").splitlines() if line.strip()),
+                "address_type": str(address.get("address_type") or "").strip(),
+                "street_address": str(address.get("street_address") or "").strip(),
+                "extended_address": str(address.get("extended_address") or "").strip(),
+                "city": str(address.get("city") or "").strip(),
+                "region": str(address.get("region") or "").strip(),
+                "postal_code": str(address.get("postal_code") or "").strip(),
+                "coordinates": coordinates,
+                "has_coordinates": has_coordinates,
+            }
         else:
-            address_text = address
-            coordinates = ""
-            has_coordinates = False
-        text = "\n".join(line.strip() for line in str(address_text or "").splitlines() if line.strip())
-        if text:
-            addresses.append(
-                {
-                    "text": text,
-                    "coordinates": coordinates,
-                    "has_coordinates": has_coordinates,
-                }
-            )
+            entry = {
+                "text": "\n".join(line.strip() for line in str(address or "").splitlines() if line.strip()),
+                "address_type": "",
+                "street_address": "",
+                "extended_address": "",
+                "city": "",
+                "region": "",
+                "postal_code": "",
+                "coordinates": "",
+                "has_coordinates": False,
+            }
+        if entry["text"] or entry["street_address"] or entry["extended_address"] or entry["city"]:
+            if not entry["text"]:
+                entry["text"] = "\n".join(
+                    part for part in (
+                        entry["street_address"],
+                        entry["extended_address"],
+                        ", ".join(part for part in (entry["city"], entry["region"], entry["postal_code"]) if part),
+                    )
+                    if part
+                )
+            addresses.append(entry)
     return {
         "name": str(contact.get("name") or contact.get("label") or "CONTACT, Name").strip(),
         "phones": phones,
@@ -361,7 +393,7 @@ async def print_address_book_pdf_page(request: Request):
         return RedirectResponse(url=f"/address-book/pdf?notice={get_edit_block_notice_key()}", status_code=303)
 
     saved_id = _save_address_book_pdf_layout_preset(preset_id, _address_book_pdf_layout_from_form(form))
-    settings = save_address_book_settings(_address_book_pdf_settings_from_form(form))
+    settings = _address_book_pdf_print_settings(form)
     layout = _address_book_pdf_layout_from_form(form)
     field_list_context = get_field_list_builder_context()
     fields = _address_book_pdf_fields_for_print(form, field_list_context)
@@ -398,7 +430,7 @@ async def print_address_book_paper_page(request: Request):
         return RedirectResponse(url=f"/address-book/pdf?notice={get_edit_block_notice_key()}", status_code=303)
 
     saved_id = _save_address_book_pdf_layout_preset(preset_id, _address_book_pdf_layout_from_form(form))
-    settings = save_address_book_settings(_address_book_pdf_settings_from_form(form))
+    settings = _address_book_pdf_print_settings(form)
     layout = _address_book_pdf_layout_from_form(form)
     field_list_context = get_field_list_builder_context()
     fields = _address_book_pdf_fields_for_print(form, field_list_context)

@@ -777,9 +777,15 @@ window.addEventListener("DOMContentLoaded", () => {
       }
 
       if (current && !textFitsWidth(piece, widthPx, "normal")) {
-        lines.push(current);
         isFirstSuffixLine = false;
-        const nextText = kind === "child" ? `; ${text}` : ` ${text}`;
+        let nextText;
+        if (kind === "child") {
+          lines.push(current.endsWith(",") ? current : `${current},`);
+          nextText = text;
+        } else {
+          lines.push(current);
+          nextText = ` ${text}`;
+        }
         if (!textFitsWidth(nextText, widthPx, "normal")) {
           lines.push(...wrapRelationshipText(nextText.trimStart(), widthPx));
           current = "";
@@ -853,7 +859,7 @@ window.addEventListener("DOMContentLoaded", () => {
     if (!pbText) return { inlineHtml: "", ownLineHtml: "" };
     const firstNameLine = wrapContactNameLine(nameValue, contact)[0] || nameValue;
     const textWidthPx = getTextColumnWidthPx(contact);
-    const fitsOnNameLine = textFitsWidth(`${firstNameLine} ${pbText}`, textWidthPx, "italic");
+    const fitsOnNameLine = textFitsWidth(`${firstNameLine} ${pbText}`, textWidthPx, "normal");
     if (fitsOnNameLine) {
       return {
         inlineHtml: `<span class="field-list-print-book-note">&nbsp;${escapeHtml(pbText)}</span>`,

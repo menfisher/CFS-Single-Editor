@@ -430,9 +430,15 @@ function packTypedSuffixLinesForAddressBookPdf(
     }
 
     if (current && measureWidth(piece) > maxWidth) {
-      lines.push(current);
       isFirstSuffixLine = false;
-      const nextText = kind === "child" ? `; ${text}` : ` ${text}`;
+      let nextText;
+      if (kind === "child") {
+        lines.push(current.endsWith(",") ? current : `${current},`);
+        nextText = text;
+      } else {
+        lines.push(current);
+        nextText = ` ${text}`;
+      }
       if (measureWidth(nextText) > maxWidth) {
         lines.push(...wrapAddressBookPdfRelationshipText(nextText.trimStart(), measureWidth, maxWidth));
         current = "";
@@ -488,6 +494,19 @@ function wrapAddressBookPdfContactNameLines(contact, maxWidthPx, fontSizePx = 10
     headLine,
     ...packTypedSuffixLinesForAddressBookPdf(typedSegments, measureWidth, maxWidthPx, { semicolonOnPreviousLine }),
   ];
+}
+
+function splitAddressBookPdfTypePrefix(text) {
+  const value = String(text || "");
+  if (!value.trim()) return { label: "", remainder: "" };
+  const lines = value.replace(/\r\n/g, "\n").split("\n");
+  const match = String(lines[0] || "").trim().match(/^([A-Za-z][A-Za-z0-9 /._-]{0,19}):\s*(.*)$/);
+  if (!match) return { label: "", remainder: value.trim() };
+  const remainderLines = [match[2].trim(), ...lines.slice(1)];
+  return {
+    label: match[1].trim(),
+    remainder: remainderLines.filter((line, index) => line || index === 0).join("\n").trim(),
+  };
 }
 
 function splitAddressBookPdfStreetAndCity(address) {
@@ -578,10 +597,20 @@ function addressBookPdfWrapAddressText(text, maxWidthPx, fontSizePx = 10, fontFa
 
 function addressBookPdfAddressDisplayLines(address, maxWidthPx = null, fontSizePx = 10, fontFamily = "Arial") {
   const entry = (address && typeof address === "object") ? address : { text: address };
-  const text = String(entry.text || address || "").trim();
+  const rawText = String(entry.text || address || "").trim();
+  const parsedPrefix = splitAddressBookPdfTypePrefix(rawText);
+  const text = parsedPrefix.remainder;
+  let addressLabel = String(entry.address_type || "").trim();
+  if (!addressLabel) addressLabel = parsedPrefix.label;
+  if (addressLabel.toLowerCase() === "home") addressLabel = "";
+  const prefix = addressLabel ? `${addressLabel}: ` : "";
   if (!text && !entry.street_address && !entry.extended_address) return [];
 
   let street1 = String(entry.street_address || "").trim();
+  const street1Prefix = splitAddressBookPdfTypePrefix(street1);
+  if (street1Prefix.label && (!addressLabel || street1Prefix.label.toLowerCase() === addressLabel.toLowerCase())) {
+    street1 = street1Prefix.remainder;
+  }
   let street2 = String(entry.extended_address || "").trim();
   let city = "";
   const cityFromParts = [entry.city, entry.region, entry.postal_code]
@@ -603,42 +632,57 @@ function addressBookPdfAddressDisplayLines(address, maxWidthPx = null, fontSizeP
     if (!city) city = parsed.city;
   }
 
+  const withPrefix = (line) => {
+    if (!prefix || !line) return line;
+    if (String(line).toLowerCase().startsWith(prefix.toLowerCase())) return line;
+    return `${prefix}${line}`;
+  };
+  const fits = (line) => (
+    maxWidthPx == null || !(maxWidthPx > 0)
+    || measureAddressBookPdfTextWidth(line, fontSizePx, fontFamily) <= maxWidthPx
+  );
+  const fitsFirst = (line) => fits(withPrefix(line));
+  const applyPrefix = (lines) => (prefix && lines.length ? [withPrefix(lines[0]), ...lines.slice(1)] : lines);
+
   const street2Parts = street2.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const streetParts = [street1, ...street2Parts].filter(Boolean);
-  const wrap = (value) => (
-    (maxWidthPx != null && maxWidthPx > 0)
-      ? addressBookPdfWrapAddressText(value, maxWidthPx, fontSizePx, fontFamily)
-      : [value]
-  );
+  const wrap = (value, firstLine = false) => {
+    if (maxWidthPx == null || !(maxWidthPx > 0)) return [value];
+    if (firstLine && prefix) {
+      const prefixed = withPrefix(value);
+      if (fits(prefixed)) return [value];
+    }
+    return addressBookPdfWrapAddressText(value, maxWidthPx, fontSizePx, fontFamily);
+  };
   const withCity = (lines) => {
     if (!city) return lines;
-    if (!lines.length) return wrap(city);
+    if (!lines.length) return wrap(city, true);
     const combined = `${lines[lines.length - 1]}, ${city}`;
-    if (maxWidthPx == null || !(maxWidthPx > 0) || measureAddressBookPdfTextWidth(combined, fontSizePx, fontFamily) <= maxWidthPx) {
+    if (fits(combined)) {
       return [...lines.slice(0, -1), combined];
     }
     return [...lines, city];
   };
   if (!streetParts.length && !city) {
-    return text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    return applyPrefix(text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean));
   }
-  if (!streetParts.length) return wrap(city);
+  if (!streetParts.length) return applyPrefix(wrap(city, true));
   if (street1 && street2Parts.length) {
-    return withCity(streetParts.flatMap((part) => wrap(part) || [part]));
+    return applyPrefix(withCity([
+      ...wrap(street1, true),
+      ...street2Parts.flatMap((part) => wrap(part) || [part]),
+    ]));
   }
   const street = streetParts.join(", ");
-  if (!city) return wrap(street);
+  if (!city) return applyPrefix(wrap(street, true));
   const oneLine = `${street}, ${city}`;
-  if (maxWidthPx == null || !(maxWidthPx > 0)) {
-    return [oneLine];
+  if (fitsFirst(oneLine)) {
+    return [withPrefix(oneLine)];
   }
-  if (measureAddressBookPdfTextWidth(oneLine, fontSizePx, fontFamily) <= maxWidthPx) {
-    return [oneLine];
+  if (fitsFirst(street)) {
+    return [withPrefix(street), city];
   }
-  if (measureAddressBookPdfTextWidth(street, fontSizePx, fontFamily) <= maxWidthPx) {
-    return [street, city];
-  }
-  return withCity(addressBookPdfWrapAddressText(street, maxWidthPx, fontSizePx, fontFamily));
+  return applyPrefix(withCity(addressBookPdfWrapAddressText(street, maxWidthPx, fontSizePx, fontFamily)));
 }
 
 function addressBookPdfAddressEntry(address) {
@@ -646,6 +690,7 @@ function addressBookPdfAddressEntry(address) {
     const coordinates = String(address.coordinates || "").trim();
     return {
       text: String(address.text || "").trim(),
+      address_type: String(address.address_type || "").trim(),
       street_address: String(address.street_address || "").trim(),
       extended_address: String(address.extended_address || "").trim(),
       city: String(address.city || "").trim(),
@@ -657,6 +702,7 @@ function addressBookPdfAddressEntry(address) {
   }
   return {
     text: String(address || "").trim(),
+    address_type: "",
     street_address: "",
     extended_address: "",
     city: "",
@@ -1154,7 +1200,7 @@ function renderAddressBookPdfContactPreviewRows(contact) {
     else pbOwnLine = pbText;
   }
   const pbInlineHtml = pbInline
-    ? `<span class="address-book-pdf-print-book" style="font-style: italic;">&nbsp;${escapeAddressBookPdfHtml(pbText)}</span>`
+    ? `<span class="address-book-pdf-print-book">&nbsp;${escapeAddressBookPdfHtml(pbText)}</span>`
     : "";
   const singleNameLine = nameLines.length === 1;
   const rows = nameLines.map((line, index) => ({
@@ -1175,7 +1221,7 @@ function renderAddressBookPdfContactPreviewRows(contact) {
     let mainHtml = "";
     if (below) {
       mainHtml = (below.kind === "pb" || below.kind === "pa")
-        ? `<div class="address-book-pdf-address-line" style="font-style: italic;">${escapeAddressBookPdfHtml(below.text)}</div>`
+        ? `<div class="address-book-pdf-address-line address-book-pdf-print-book">${escapeAddressBookPdfHtml(below.text)}</div>`
         : renderAddressBookPdfAddressLineHtml(below.address);
     }
     rows.push({

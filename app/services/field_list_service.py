@@ -6,7 +6,7 @@ from datetime import datetime
 from html import escape
 from typing import Any
 
-from app.services.address_format import address_display_lines, enrich_address_parts
+from app.services.address_format import address_display_lines, enrich_address_parts, split_address_type_prefix
 from app.database import _ensure_field_list_tables, fetch_all, get_connection
 from app.services.preset_service import FONT_FAMILY_OPTIONS
 from app.services.print_order_service import order_field_names, order_meeting_names
@@ -1129,14 +1129,12 @@ def _field_list_address_display_lines(
             raw_text = item.get("text")
             if raw_text is None:
                 raw_text = _field_list_display_address(item)
-            # Prefer structured fields; avoid feeding label-prefixed text into the parser.
+            address_type = _clean(item.get("address_type"))
             formatted_only = ""
             if not (item.get("street_address") or item.get("extended_address") or item.get("city")):
-                formatted_only = str(raw_text or "")
-                if ":" in formatted_only:
-                    maybe_label, maybe_rest = formatted_only.split(":", 1)
-                    if len(maybe_label.strip()) <= 20:
-                        formatted_only = maybe_rest.strip()
+                parsed_label, formatted_only = split_address_type_prefix(str(raw_text or ""))
+                if not address_type:
+                    address_type = parsed_label
             display_lines = address_display_lines(
                 formatted_only,
                 street_address=item.get("street_address") or "",
@@ -1144,17 +1142,10 @@ def _field_list_address_display_lines(
                 city=item.get("city") or "",
                 region=item.get("region") or "",
                 postal_code=item.get("postal_code") or "",
+                label=address_type,
                 max_width=max_width,
                 text_width=text_width,
             )
-            address_type = _clean(item.get("address_type"))
-            if (
-                address_type
-                and address_type.lower() not in {"home"}
-                and display_lines
-                and not display_lines[0].lower().startswith(f"{address_type.lower()}:")
-            ):
-                display_lines[0] = f"{address_type}: {display_lines[0]}"
         else:
             display_lines = address_display_lines(
                 str(item or ""),
@@ -1321,9 +1312,13 @@ def _pack_typed_suffix_lines(
             piece = f"{current}, {text}"
 
         if current and measure_width(piece) > max_width:
-            lines.append(current)
             is_first_suffix_line = False
-            next_text = f"; {text}" if kind == "child" else f" {text}"
+            if kind == "child":
+                lines.append(current if current.endswith(",") else f"{current},")
+                next_text = text
+            else:
+                lines.append(current)
+                next_text = f" {text}"
             if measure_width(next_text) > max_width:
                 append_wrapped(next_text.lstrip())
                 current = ""
@@ -4167,7 +4162,8 @@ main {{
 }}
 .print-field-list-print-book-note,
 .print-field-list-print-after-note {{
-  font-style: italic;
+  font-style: normal;
+  font-family: inherit;
   font-weight: 500;
 }}
 .print-field-list-print-note-line {{

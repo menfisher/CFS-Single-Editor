@@ -701,7 +701,8 @@ def list_contacts(search_text: str = "", field_filter: str = "", meeting_filter:
               c.photo,
               c.fields_text,
               c.meetings_text,
-              c.mtg_home_elder_flag
+              c.mtg_home_elder_flag,
+              c.notes
             FROM contacts c
             WHERE
               (? = '' OR c.family_name LIKE ? OR c.given_name LIKE ?) AND

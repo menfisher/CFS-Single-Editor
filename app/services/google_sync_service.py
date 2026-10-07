@@ -9441,6 +9441,11 @@ GOOGLE_RELATION_TYPE_ALIASES = {
 }
 
 
+CFS_RELATION_TYPES_FIELD = "CFS Relation Types"
+_LOSSY_GOOGLE_RELATION_TYPES = {"", "other", "spouse"}
+_CFS_SPOUSE_LABELS = {"husband", "wife"}
+
+
 def _google_relation_type(value: str | None) -> str:
     cleaned = _clean(value)
     if not cleaned:
@@ -9449,9 +9454,145 @@ def _google_relation_type(value: str | None) -> str:
     if normalized in GOOGLE_RELATION_TYPE_ALIASES:
         return GOOGLE_RELATION_TYPE_ALIASES[normalized]
     lookup_key = normalized.replace("_", "")
+    if lookup_key in _CFS_SPOUSE_LABELS:
+        return "spouse"
     if lookup_key in GOOGLE_PREDEFINED_RELATION_TYPES:
         return normalized
     return cleaned
+
+
+def _is_cfs_relation_types_field(value: object) -> bool:
+    return _clean(value).casefold() == CFS_RELATION_TYPES_FIELD.casefold()
+
+
+def _encode_cfs_relation_types(relationships: list) -> str:
+    parts: list[str] = []
+    for item in relationships or []:
+        if not isinstance(item, dict):
+            continue
+        relation_type = _clean(item.get("relation_type"))
+        relation_value = _clean(item.get("relation_value"))
+        if not relation_type or not relation_value:
+            continue
+        lookup_key = relation_type.lower().replace(" ", "").replace("_", "")
+        if lookup_key in GOOGLE_PREDEFINED_RELATION_TYPES:
+            continue
+        parts.append(f"{relation_type}={relation_value}")
+    return "|".join(parts)
+
+
+def _parse_cfs_relation_types(value: object) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for part in _clean(value).split("|"):
+        piece = part.strip()
+        if "=" not in piece:
+            continue
+        relation_type, relation_value = piece.split("=", 1)
+        relation_type = _clean(relation_type)
+        relation_value = _clean(relation_value)
+        if relation_type and relation_value:
+            mapping[relation_value.casefold()] = relation_type
+    return mapping
+
+
+def _cfs_relation_labels_from_user_defined(user_defined: list) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for item in user_defined or []:
+        if not isinstance(item, dict):
+            continue
+        if _is_cfs_relation_types_field(item.get("key")):
+            mapping.update(_parse_cfs_relation_types(item.get("value")))
+    return mapping
+
+
+def _cfs_relation_labels_from_local(relationships: list) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for item in relationships or []:
+        if not isinstance(item, dict):
+            continue
+        relation_type = _clean(item.get("relation_type"))
+        relation_value = _clean(item.get("relation_value"))
+        if relation_type and relation_value:
+            mapping[relation_value.casefold()] = relation_type
+    return mapping
+
+
+def _complementary_spouse_label(relation_type: str) -> str:
+    key = _clean(relation_type).lower()
+    if key == "husband":
+        return "Wife"
+    if key == "wife":
+        return "Husband"
+    return ""
+
+
+def _lookup_complementary_spouse_label(conn, contact_id: int, person_name: str) -> str:
+    if conn is None or not contact_id or not _clean(person_name):
+        return ""
+    me = conn.execute(
+        "SELECT given_name, family_name FROM contacts WHERE id = ?",
+        (int(contact_id),),
+    ).fetchone()
+    my_given = _clean(me["given_name"] if me else "")
+    my_family = _clean(me["family_name"] if me else "")
+    if not my_given:
+        return ""
+    rows = conn.execute(
+        """
+        SELECT c.family_name, r.relation_type, r.relation_value
+        FROM contacts c
+        JOIN relationships r ON r.contact_id = c.id
+        WHERE c.id != ?
+          AND lower(c.given_name) = lower(?)
+          AND lower(r.relation_type) IN ('husband', 'wife')
+        """,
+        (int(contact_id), _clean(person_name)),
+    ).fetchall()
+    my_given_key = my_given.casefold()
+    family_match = ""
+    any_match = ""
+    for row in rows:
+        if _clean(row["relation_value"]).casefold() != my_given_key:
+            continue
+        label = _complementary_spouse_label(row["relation_type"])
+        if not label:
+            continue
+        any_match = label
+        if my_family and _clean(row["family_name"]).casefold() == my_family.casefold():
+            family_match = label
+    return family_match or any_match
+
+
+def _restore_imported_relation_type(
+    google_type: str,
+    person_name: str,
+    *,
+    stored_labels: dict[str, str] | None = None,
+    local_labels: dict[str, str] | None = None,
+    complementary_label: str = "",
+) -> str:
+    google_type = _clean(google_type)
+    person_name = _clean(person_name)
+    google_key = google_type.lower().replace(" ", "").replace("_", "")
+    stored = _clean((stored_labels or {}).get(person_name.casefold()))
+    local = _clean((local_labels or {}).get(person_name.casefold()))
+    if stored:
+        return stored
+    if google_key in _LOSSY_GOOGLE_RELATION_TYPES:
+        if local.lower() in _CFS_SPOUSE_LABELS:
+            return local
+        if complementary_label:
+            return complementary_label
+        if local and google_key == "other":
+            return local
+    return google_type
+
+
+def _relation_compare_key(relation_type: str, relation_value: str) -> tuple[str, str]:
+    type_key = _clean(relation_type).lower().replace(" ", "").replace("_", "")
+    if type_key in {"husband", "wife", "spouse", "other"}:
+        type_key = "spouse"
+    return (type_key, _clean(relation_value).casefold())
 
 
 def _contact_names_payload(contact: dict) -> list[dict]:
@@ -9595,6 +9736,8 @@ def _contact_person_payload(contact: dict) -> dict:
     for item in contact.get("custom_fields", []):
         field_key = _clean(item.get("field_type"))
         field_value = _clean(item.get("field_value"))
+        if _is_cfs_relation_types_field(field_key):
+            continue
         if _is_coordinate_custom_field_key(field_key) and _normalize_coordinates(field_value):
             continue
         if not field_key and not field_value:
@@ -9605,6 +9748,11 @@ def _contact_person_payload(contact: dict) -> dict:
         if field_value:
             custom_payload["value"] = field_value
         custom_fields.append(custom_payload)
+    encoded_relation_types = _encode_cfs_relation_types(contact.get("relationships"))
+    if encoded_relation_types:
+        custom_fields.append(
+            {"key": CFS_RELATION_TYPES_FIELD, "value": encoded_relation_types}
+        )
     if custom_fields:
         payload["userDefined"] = custom_fields
 
@@ -10361,10 +10509,29 @@ def _google_address_structured_fields(address: dict) -> dict[str, str]:
     return enriched
 
 
-def _insert_contact_child_rows_from_google(conn, contact_id: int, fields: dict) -> None:
+def _insert_contact_child_rows_from_google(
+    conn,
+    contact_id: int,
+    fields: dict,
+    *,
+    local_relationships: list | None = None,
+) -> None:
+    stored_labels = _cfs_relation_labels_from_user_defined(fields.get("user_defined") or [])
+    local_labels = _cfs_relation_labels_from_local(local_relationships or [])
     for index, relation in enumerate(fields.get("relations") or [], start=1):
-        relation_type = _clean(relation.get("type") or relation.get("formattedType"))
+        google_type = _clean(relation.get("type") or relation.get("formattedType"))
         relation_value = _clean(relation.get("person"))
+        complementary_label = ""
+        google_key = google_type.lower().replace(" ", "").replace("_", "")
+        if google_key in _LOSSY_GOOGLE_RELATION_TYPES:
+            complementary_label = _lookup_complementary_spouse_label(conn, contact_id, relation_value)
+        relation_type = _restore_imported_relation_type(
+            google_type,
+            relation_value,
+            stored_labels=stored_labels,
+            local_labels=local_labels,
+            complementary_label=complementary_label,
+        )
         if relation_type or relation_value:
             conn.execute(
                 """
@@ -10446,6 +10613,8 @@ def _insert_contact_child_rows_from_google(conn, contact_id: int, fields: dict) 
     for index, item in enumerate(fields.get("user_defined") or [], start=1):
         field_type = _clean(item.get("key"))
         field_value = _clean(item.get("value"))
+        if _is_cfs_relation_types_field(field_type):
+            continue
         if _is_coordinate_custom_field_key(field_type) and _normalize_coordinates(field_value):
             continue
         if field_type or field_value:
@@ -10508,6 +10677,7 @@ def _update_contact_from_google_person(conn, contact_id: int, fields: dict) -> N
         "SELECT photo, photo_drive_file_id FROM contacts WHERE id = ?",
         (int(contact_id),),
     ).fetchone()
+    local_relationships = _load_contact_children(conn, "relationships", contact_id)
     photo = fields["photo"]
     if existing and _remote_has_custom_drive_photo(dict(existing)):
         photo = _clean_contact_photo_path(existing["photo"])
@@ -10549,7 +10719,12 @@ def _update_contact_from_google_person(conn, contact_id: int, fields: dict) -> N
         ),
     )
     _clear_contact_child_rows(conn, contact_id)
-    _insert_contact_child_rows_from_google(conn, contact_id, fields)
+    _insert_contact_child_rows_from_google(
+        conn,
+        contact_id,
+        fields,
+        local_relationships=local_relationships,
+    )
 
 
 def _delete_local_contact_by_google_id(conn, google_contact_id: str) -> bool:
@@ -10644,7 +10819,15 @@ def _contact_matches_google_person_fields(conn, contact_id: int, fields: dict) -
     )
     if _clean(contact.get("group_membership")) != expected_group_membership:
         return False
-    if _local_import_repeatable_rows(contact) != _google_import_repeatable_rows(fields):
+    local_rows = _local_import_repeatable_rows(contact)
+    google_rows = _google_import_repeatable_rows(fields)
+    if (
+        local_rows["phones"] != google_rows["phones"]
+        or local_rows["emails"] != google_rows["emails"]
+        or local_rows["addresses"] != google_rows["addresses"]
+        or [_relation_compare_key(*row) for row in local_rows["relationships"]]
+        != [_relation_compare_key(*row) for row in google_rows["relationships"]]
+    ):
         return False
     if _remote_has_custom_drive_photo(contact):
         return True
@@ -11001,9 +11184,20 @@ def import_google_contacts() -> int:
             )
             contact_id = int(cursor.lastrowid)
 
+            stored_labels = _cfs_relation_labels_from_user_defined(user_defined)
             for index, relation in enumerate(person.get("relations") or [], start=1):
-                relation_type = _clean(relation.get("type") or relation.get("formattedType"))
+                google_type = _clean(relation.get("type") or relation.get("formattedType"))
                 relation_value = _clean(relation.get("person"))
+                complementary_label = ""
+                google_key = google_type.lower().replace(" ", "").replace("_", "")
+                if google_key in _LOSSY_GOOGLE_RELATION_TYPES:
+                    complementary_label = _lookup_complementary_spouse_label(conn, contact_id, relation_value)
+                relation_type = _restore_imported_relation_type(
+                    google_type,
+                    relation_value,
+                    stored_labels=stored_labels,
+                    complementary_label=complementary_label,
+                )
                 if relation_type or relation_value:
                     conn.execute(
                         """
@@ -11082,6 +11276,8 @@ def import_google_contacts() -> int:
             for index, item in enumerate(user_defined, start=1):
                 field_type = _clean(item.get("key"))
                 field_value = _clean(item.get("value"))
+                if _is_cfs_relation_types_field(field_type):
+                    continue
                 if _is_coordinate_custom_field_key(field_type) and _normalize_coordinates(field_value):
                     continue
                 if field_type or field_value:

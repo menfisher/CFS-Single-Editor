@@ -470,6 +470,11 @@
   font-weight: 800;
 }
 
+.address-book-pdf-print-book {
+  font-style: normal;
+  font-family: inherit;
+}
+
 .address-book-pdf-contact-address {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -1583,31 +1588,33 @@ h3 {
 
 .contacts-search-bar {
   display: grid;
-  grid-template-columns: minmax(340px, 0.9fr) 280px 280px max-content;
+  grid-template-columns: minmax(180px, 1.1fr) minmax(150px, 0.7fr) minmax(150px, 0.7fr) max-content;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 
 .contacts-filter-shell {
   display: grid;
   gap: 10px;
+  min-width: 0;
 }
 
 .contacts-filter-title-row {
-  display: grid;
-  grid-template-columns: minmax(260px, auto) minmax(0, 1fr);
-  align-items: start;
+  display: flex;
+  align-items: center;
   gap: 20px;
+  min-width: 0;
 }
 
 .contacts-filter-panel .contacts-search-bar {
-  grid-template-columns: minmax(260px, 260px) minmax(340px, 0.9fr) minmax(320px, 0.7fr) minmax(320px, 0.7fr) max-content;
+  grid-template-columns: minmax(180px, 1.1fr) minmax(150px, 0.7fr) minmax(150px, 0.7fr) max-content;
   width: 100%;
 }
 
 .contacts-filter-panel .contacts-search-bar::before {
-  content: "";
-  display: block;
+  content: none;
+  display: none;
 }
 
 .contacts-search-bar input,
@@ -1625,16 +1632,16 @@ h3 {
   min-width: 0;
   padding-left: 18px;
   padding-right: 18px;
-  margin-left: auto;
+  margin-left: 0;
 }
 
 .contacts-action-bar {
   display: flex;
   align-items: center;
-  gap: 18px;
-  justify-self: end;
-  margin: 8px 0 0;
+  gap: 14px;
+  margin: 0;
   white-space: nowrap;
+  min-width: 0;
 }
 
 .contacts-action-inline-form {
@@ -1972,6 +1979,8 @@ h3 {
   font-weight: 700;
   color: var(--ink);
   margin: 0;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 input,
@@ -2042,7 +2051,11 @@ button.site-nav-dropdown-item:hover {
 }
 
 .contacts-col-addresses {
-  width: 30%;
+  width: 20%;
+}
+
+.contacts-col-notes {
+  width: 20%;
 }
 
 .data-table th,
@@ -7427,7 +7440,8 @@ button.site-nav-dropdown-item:hover {
 
 .field-list-print-book-note,
 .field-list-print-after-note {
-  font-style: italic;
+  font-style: normal;
+  font-family: inherit;
   font-weight: 500;
 }
 

@@ -1885,6 +1885,7 @@ def build_address_book_pdf(
         main_text_x = phone_code_x + tw("MM", font_size) + space_width
         continuation_x = main_text_x + space_width
         name_max_width = max(24, page_width - margin_right - continuation_x)
+        # Addresses never use the phone column, even when right-aligned.
         address_max_width = max(24, page_width - margin_right - (main_text_x + space_width))
         address_line_count = 0
         for address in addresses:
@@ -1898,6 +1899,7 @@ def build_address_book_pdf(
                     city=_clean(entry.get("city")),
                     region=_clean(entry.get("region")),
                     postal_code=_clean(entry.get("postal_code")),
+                    label=_clean(entry.get("address_type")),
                     max_width=address_max_width,
                     text_width=lambda value, size=font_size: tw(value, size),
                 )
@@ -1968,6 +1970,7 @@ def build_address_book_pdf(
                 main_text_x = phone_code_x + tw("MM", font_size) + space_width
                 continuation_x = main_text_x + space_width
                 name_max_width = max(24, page_width - margin_right - continuation_x)
+                # Addresses never use the phone column, even when right-aligned.
                 address_max_width = max(24, page_width - margin_right - (main_text_x + space_width))
                 address_lines: list[tuple[str, str, bool]] = []
                 for address in addresses:
@@ -1983,6 +1986,7 @@ def build_address_book_pdf(
                         city=_clean(entry.get("city")),
                         region=_clean(entry.get("region")),
                         postal_code=_clean(entry.get("postal_code")),
+                        label=_clean(entry.get("address_type")),
                         max_width=address_max_width,
                         text_width=lambda value, size=font_size: tw(value, size),
                     ):
@@ -2041,7 +2045,7 @@ def build_address_book_pdf(
                     line_x = main_text_x if index == 0 else continuation_x
                     add_contact_name_line(line, line_x, bold_last_name=(index == 0))
                     if index == 0 and pb_inline_text:
-                        add_text(pb_inline_text, line_x + tw(line, font_size) + space_width, italic=True)
+                        add_text(pb_inline_text, line_x + tw(line, font_size) + space_width)
                 y -= line_step
                 # Lines rendered below the name share rows with any remaining phones,
                 # so the note never pushes a phone onto a line of its own. The pb note
@@ -2070,7 +2074,7 @@ def build_address_book_pdf(
                                 page_width - margin_right - tw(line, font_size),
                             )
                         if kind in ("pb", "pa"):
-                            add_text(line, x, italic=True)
+                            add_text(line, x)
                         else:
                             add_text(line, x, uri=uri, italic=address_italic and not has_coordinates)
                     y -= line_step

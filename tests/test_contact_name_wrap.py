@@ -32,6 +32,21 @@ class RelationshipWrapTests(unittest.TestCase):
         self.assertTrue(lines[1].rstrip().endswith(","), lines)
         self.assertFalse(lines[-1].rstrip().endswith(","), lines)
 
+    def test_wrapped_child_uses_comma_not_semicolon(self) -> None:
+        contact = {
+            "name": "BERRY, Andrew & Christina",
+            "children": ["Kynlee", "James", "Jack MOORE", "Lily", "Blakely BERRY"],
+            "other_relationships": [],
+        }
+        lines = _wrap_contact_name_lines(contact, lambda text: float(len(text)), 32.0)
+        self.assertEqual(lines[0], "BERRY, Andrew & Christina;")
+        self.assertTrue(any("Lily" in line for line in lines), lines)
+        self.assertTrue(any("Blakely BERRY" in line for line in lines), lines)
+        joined = "\n".join(lines[1:])
+        self.assertNotIn(";", joined)
+        lily_line = next(line for line in lines if "Lily" in line)
+        self.assertTrue(lily_line.rstrip().endswith(","), lines)
+
 
 if __name__ == "__main__":
     unittest.main()

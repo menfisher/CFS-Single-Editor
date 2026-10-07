@@ -12,10 +12,35 @@ _STATE_ZIP_ONLY_RE = re.compile(
 _TRAILING_CITY_STATE_ZIP_RE = re.compile(
     r"^(?P<street>.+?),\s*(?P<city_line>[^,]+,\s*[A-Za-z]{2}\s+\d{5}(?:-\d{4})?)\s*$"
 )
+_ADDRESS_TYPE_PREFIX_RE = re.compile(
+    r"^([A-Za-z][A-Za-z0-9 /._-]{0,19}):\s*"
+)
 
 
 def _clean(value: object) -> str:
     return str(value or "").strip()
+
+
+def split_address_type_prefix(text: str) -> tuple[str, str]:
+    """Split a leading 'Work:' / 'Other:' label from formatted address text."""
+    value = str(text or "").replace("\r", "\n")
+    if not value.strip():
+        return "", ""
+    first, *rest = value.split("\n", 1)
+    match = _ADDRESS_TYPE_PREFIX_RE.match(first.strip())
+    if not match:
+        return "", _clean(value)
+    remainder = first.strip()[match.end() :].strip()
+    if rest:
+        remainder = "\n".join(part for part in (remainder, rest[0]) if part)
+    return match.group(1).strip(), remainder
+
+
+def normalize_address_label(label: str) -> str:
+    cleaned = _clean(label)
+    if not cleaned or cleaned.lower() == "home":
+        return ""
+    return cleaned
 
 
 def build_city_line(
@@ -305,6 +330,7 @@ def address_display_lines(
     city: str = "",
     region: str = "",
     postal_code: str = "",
+    label: str = "",
     max_width: float | None = None,
     text_width=None,
 ) -> list[str]:
@@ -313,7 +339,8 @@ def address_display_lines(
     Street address 1 and street address 2 stay on separate lines when both
     are filled. With only one street line, prefer street + city on one line;
     if that is too wide, put city/state/ZIP on the next line. Long street
-    blocks wrap at commas so lines stay inside the name/address column.
+    blocks wrap at commas so lines stay inside the available address width.
+    Non-Home labels such as Work: are included in the one-line fit check.
     """
     def _fits(line: str) -> bool:
         if max_width is None or text_width is None:
@@ -323,15 +350,39 @@ def address_display_lines(
         except Exception:
             return True
 
+    parsed_label, unlabeled_value = split_address_type_prefix(value)
+    address_label = normalize_address_label(label) or normalize_address_label(parsed_label)
+    prefix = f"{address_label}: " if address_label else ""
+
+    def _with_prefix(line: str) -> str:
+        if not prefix or not line:
+            return line
+        if line.lower().startswith(prefix.lower()):
+            return line
+        return f"{prefix}{line}"
+
+    def _fits_first(line: str) -> bool:
+        return _fits(_with_prefix(line))
+
+    def _apply_prefix(lines: list[str]) -> list[str]:
+        if not prefix or not lines:
+            return lines
+        return [_with_prefix(lines[0]), *lines[1:]]
+
     enriched = enrich_address_parts(
         street_address=street_address,
         extended_address=extended_address,
         city=city,
         region=region,
         postal_code=postal_code,
-        formatted_address=value,
+        formatted_address=unlabeled_value,
     )
     street1 = _clean(enriched["street_address"])
+    street1_label, street1_rest = split_address_type_prefix(street1)
+    if street1_label and (
+        not address_label or street1_label.lower() == address_label.lower()
+    ):
+        street1 = street1_rest
     street2 = _clean(str(enriched["extended_address"] or "").replace("\r", "\n"))
     street2_parts = [part.strip() for part in street2.split("\n") if part.strip()]
     street_segments = [part for part in [street1, *street2_parts] if part]
@@ -340,21 +391,22 @@ def address_display_lines(
     if not street_segments and not city_line:
         return []
     if not street_segments:
-        return _wrap_address_text_to_width(city_line, fits=_fits)
+        return _apply_prefix(_wrap_address_text_to_width(city_line, fits=_fits_first if prefix else _fits))
 
     if street1 and street2_parts:
-        lines: list[str] = []
-        for segment in street_segments:
-            lines.extend(_wrap_address_text_to_width(segment, fits=_fits) or [segment])
-        return _with_city_line(lines, city_line, _fits)
+        first = _wrap_address_text_to_width(street1, fits=_fits_first if prefix else _fits) or [street1]
+        rest: list[str] = []
+        for segment in street2_parts:
+            rest.extend(_wrap_address_text_to_width(segment, fits=_fits) or [segment])
+        return _apply_prefix(_with_city_line([*first, *rest], city_line, _fits))
 
     street_block = ", ".join(street_segments)
     if not city_line:
-        return _wrap_address_text_to_width(street_block, fits=_fits)
+        return _apply_prefix(_wrap_address_text_to_width(street_block, fits=_fits_first if prefix else _fits))
 
     one_line = f"{street_block}, {city_line}"
-    if _fits(one_line):
-        return [one_line]
-    if _fits(street_block):
-        return [street_block, city_line]
-    return _with_city_line(_wrap_address_text_to_width(street_block, fits=_fits), city_line, _fits)
+    if _fits_first(one_line):
+        return [_with_prefix(one_line)]
+    if _fits_first(street_block):
+        return [_with_prefix(street_block), city_line]
+    return _apply_prefix(_with_city_line(_wrap_address_text_to_width(street_block, fits=_fits), city_line, _fits))
