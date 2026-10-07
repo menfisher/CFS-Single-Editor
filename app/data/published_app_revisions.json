@@ -2,8 +2,13 @@
   "format": "contactsfreeshare.published_revisions.v1",
   "revisions": [
     {
-      "version": "1.227",
+      "version": "1.228",
+      "date_display": "10/7/2026",
+      "description": "Place the address book insert before the table of contents without counting it as a numbered page. Paper books can turn cut marks on or off. Inserted PDFs print at 600 dpi from the original file instead of a soft JPEG."
+    },
+    {
       "date_display": "10/6/2026",
+      "version": "1.227",
       "description": "Keep Husband and Wife labels through Google sync instead of importing Other. Address Book print includes Meeting Data. Addresses stay in the name column, the contacts page has a Notes column and a fitted toolbar, and pa/pb notes use the book font."
     },
     {
