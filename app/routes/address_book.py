@@ -227,6 +227,7 @@ def _address_book_pdf_insert_options_from_form(form) -> dict:
         "insert_file_mime": str(form.get("insert_file_mime") or "") if enabled else "",
         "insert_file_width": str(form.get("insert_file_width") or "0") if enabled else "0",
         "insert_file_height": str(form.get("insert_file_height") or "0") if enabled else "0",
+        "insert_file_crop": str(form.get("insert_file_crop") or "") if enabled else "",
     }
 
 
@@ -446,6 +447,7 @@ async def print_address_book_paper_page(request: Request):
         print_order_mode=str(form.get("print_order_mode") or settings.get("print_order_mode") or "alphabetical"),
         print_order_json=str(form.get("print_order_json") or settings.get("print_order_json") or ""),
         paper_book_binding=binding,
+        paper_book_cut_marks=str(form.get("paper_book_cut_marks") or "1") != "0",
         **_address_book_pdf_cover_options_from_form(form),
         **_address_book_pdf_insert_options_from_form(form),
     )

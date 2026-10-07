@@ -46,6 +46,7 @@
     <input type="hidden" name="insert_file_width" value="" data-address-book-pdf-insert-file-width>
     <input type="hidden" name="insert_file_height" value="" data-address-book-pdf-insert-file-height>
     <input type="hidden" name="insert_file_label" value="" data-address-book-pdf-insert-file-label>
+    <input type="hidden" name="insert_file_crop" value="" data-address-book-pdf-insert-file-crop>
 
     <aside class="panel address-book-pdf-sidebar address-book-pdf-sidebar-left">
       <section class="address-book-pdf-palette">
@@ -335,20 +336,33 @@
           Print PDF
         </button>
         <div class="address-book-pdf-paper-book-block">
-          <div class="address-book-pdf-palette-title">Book binding</div>
-          <div class="address-book-pdf-choice-column">
-            <label>
-              <input type="radio" name="paper_book_binding" value="side_spiral" checked>
-              <span>Side spiral</span>
-            </label>
-            <label>
-              <input type="radio" name="paper_book_binding" value="top_spiral">
-              <span>Top spiral</span>
-            </label>
-            <label>
-              <input type="radio" name="paper_book_binding" value="stapled_folded">
-              <span>Stapled/folded</span>
-            </label>
+          <div class="address-book-pdf-paper-book-options">
+            <div class="address-book-pdf-choice-column">
+              <div class="address-book-pdf-palette-title">Book binding</div>
+              <label>
+                <input type="radio" name="paper_book_binding" value="side_spiral" checked>
+                <span>Side spiral</span>
+              </label>
+              <label>
+                <input type="radio" name="paper_book_binding" value="top_spiral">
+                <span>Top spiral</span>
+              </label>
+              <label>
+                <input type="radio" name="paper_book_binding" value="stapled_folded">
+                <span>Stapled/folded</span>
+              </label>
+            </div>
+            <div class="address-book-pdf-choice-column">
+              <div class="address-book-pdf-palette-title">Cut marks</div>
+              <label>
+                <input type="radio" name="paper_book_cut_marks" value="1" checked>
+                <span>On</span>
+              </label>
+              <label>
+                <input type="radio" name="paper_book_cut_marks" value="0">
+                <span>Off</span>
+              </label>
+            </div>
           </div>
           <button
             type="submit"
@@ -483,7 +497,7 @@
     <dialog class="app-modal address-book-pdf-insert-modal" data-address-book-pdf-insert-modal>
       <div class="app-modal-panel address-book-pdf-insert-panel">
         <div class="app-modal-header">
-          <h3 class="app-modal-title">Add file after Table of Contents</h3>
+          <h3 class="app-modal-title">Add file before Table of Contents</h3>
         </div>
         <div class="address-book-pdf-insert-tool">
           <label class="form-label" for="address-book-pdf-insert-file">
@@ -527,5 +541,5 @@
 
 {% block extra_scripts %}
   <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
-  <script src="/static/js/address_book_pdf.js?v=78"></script>
+  <script src="/static/js/address_book_pdf.js?v=80"></script>
 {% endblock %}

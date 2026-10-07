@@ -5,6 +5,7 @@ from app.services.address_book_pdf_service import (
     _PdfPage,
     _PdfRule,
     _draw_cut_marks,
+    _impose_pages_to_letter,
     _letter_block_offset_x,
     _letter_positions,
     _mirror_side_spiral_even_page_margins,
@@ -61,6 +62,18 @@ class AddressBookLetterImpositionTests(unittest.TestCase):
         self.assertAlmostEqual(even.lines[0].x, margin_right)
         self.assertAlmostEqual(even.rules[0].x1, margin_right)
         self.assertAlmostEqual(even.rules[0].x2, 200.0 + (margin_right - margin_left))
+
+    def test_imposed_sheets_include_cut_marks_by_default(self) -> None:
+        pages = [_PdfPage(3.5 * 72.0, 5.0 * 72.0) for _ in range(4)]
+        imposed = _impose_pages_to_letter(pages, "side_spiral")
+        self.assertTrue(imposed)
+        self.assertGreater(sum(len(page.rules) for page in imposed), 0)
+
+    def test_imposed_sheets_can_omit_cut_marks(self) -> None:
+        pages = [_PdfPage(3.5 * 72.0, 5.0 * 72.0) for _ in range(4)]
+        imposed = _impose_pages_to_letter(pages, "side_spiral", include_cut_marks=False)
+        self.assertTrue(imposed)
+        self.assertEqual(sum(len(page.rules) for page in imposed), 0)
 
 
 if __name__ == "__main__":

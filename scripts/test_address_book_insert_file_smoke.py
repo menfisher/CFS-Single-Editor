@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke test: insert file page after TOC with corrected page numbers."""
+"""Smoke test: insert file page before TOC with corrected page numbers."""
 
 from __future__ import annotations
 
@@ -63,6 +63,14 @@ def _pdf_page_count(pdf: bytes) -> int:
     document = fitz.open(stream=pdf, filetype="pdf")
     try:
         return document.page_count
+    finally:
+        document.close()
+
+
+def _pdf_page_texts(pdf: bytes) -> list[str]:
+    document = fitz.open(stream=pdf, filetype="pdf")
+    try:
+        return [page.get_text("text") for page in document]
     finally:
         document.close()
 
@@ -137,6 +145,10 @@ def test_insert_page_builder_returns_one_page_for_pdf() -> None:
     )
     assert len(pages) == 1
     assert pages[0].images
+    image = pages[0].images[0]
+    assert image.filter_name == "FlateDecode"
+    assert image.pixel_width >= 2000
+    assert image.pixel_height >= 3000
 
 
 def test_insert_file_adds_page_and_shifts_content_footer() -> None:
@@ -150,7 +162,11 @@ def test_insert_file_adds_page_and_shifts_content_footer() -> None:
         insert_file_height=height,
     )
     assert _pdf_page_count(with_insert) == _pdf_page_count(baseline) + 1
-    assert "Field A - Page 3" in _pdf_texts(with_insert)
+    assert "Field A - Page 2" in _pdf_texts(with_insert)
+    assert "Field A - Page 3" not in _pdf_texts(with_insert)
+    page_texts = _pdf_page_texts(with_insert)
+    assert "Table of Contents" not in page_texts[0]
+    assert "Table of Contents" in page_texts[1]
 
 
 def test_cover_and_insert_both_shift_content_footer() -> None:
@@ -165,7 +181,12 @@ def test_cover_and_insert_both_shift_content_footer() -> None:
         insert_file_width=width,
         insert_file_height=height,
     )
-    assert "Field A - Page 4" in _pdf_texts(pdf)
+    assert "Field A - Page 3" in _pdf_texts(pdf)
+    assert "Field A - Page 4" not in _pdf_texts(pdf)
+    page_texts = _pdf_page_texts(pdf)
+    assert "Table of Contents" not in page_texts[0]
+    assert "Table of Contents" not in page_texts[1]
+    assert "Table of Contents" in page_texts[2]
 
 
 if __name__ == "__main__":

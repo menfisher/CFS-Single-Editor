@@ -2526,6 +2526,7 @@ function installAddressBookPdfInsertFileModal(form) {
   const widthInput = document.querySelector("[data-address-book-pdf-insert-file-width]");
   const heightInput = document.querySelector("[data-address-book-pdf-insert-file-height]");
   const labelInput = document.querySelector("[data-address-book-pdf-insert-file-label]");
+  const cropInput = document.querySelector("[data-address-book-pdf-insert-file-crop]");
   if (
     !modal
     || !openButton
@@ -2543,6 +2544,7 @@ function installAddressBookPdfInsertFileModal(form) {
     || !widthInput
     || !heightInput
     || !labelInput
+    || !cropInput
   ) {
     return;
   }
@@ -2567,15 +2569,25 @@ function installAddressBookPdfInsertFileModal(form) {
     }
   };
 
-  const trimDimensions = () => {
-    const widthIn = Math.max(0.1, addressBookPdfNumber(form, "trim_width_in", 3.5));
-    const heightIn = Math.max(0.1, addressBookPdfNumber(form, "trim_height_in", 5.5));
-    const scale = Math.min(360, Math.max(180, 300));
+  const PRINT_PX_PER_IN = 600;
+  const PREVIEW_PX_PER_IN = 144;
+  const PRINT_JPEG_QUALITY = 0.95;
+
+  const pageTrimInches = () => ({
+    widthIn: Math.max(0.1, addressBookPdfNumber(form, "trim_width_in", 3.5)),
+    heightIn: Math.max(0.1, addressBookPdfNumber(form, "trim_height_in", 5.5)),
+  });
+
+  const dimensionsAtDpi = (pxPerIn) => {
+    const { widthIn, heightIn } = pageTrimInches();
     return {
-      width: Math.max(1, Math.round(widthIn * scale)),
-      height: Math.max(1, Math.round(heightIn * scale)),
+      width: Math.max(1, Math.round(widthIn * pxPerIn)),
+      height: Math.max(1, Math.round(heightIn * pxPerIn)),
     };
   };
+
+  const trimDimensions = () => dimensionsAtDpi(PRINT_PX_PER_IN);
+  const previewTrimDimensions = () => dimensionsAtDpi(PREVIEW_PX_PER_IN);
 
   // On-screen preview size: fit within the modal while keeping the trim page
   // aspect ratio, so the preview mirrors the printed page instead of overflowing.
@@ -2603,8 +2615,8 @@ function installAddressBookPdfInsertFileModal(form) {
     const label = labelInput.value || "Selected file";
     const fromPdf = /\.pdf$/i.test(label) || mimeInput.value === "application/pdf";
     const detail = fromPdf
-      ? "PDF page 1 will be inserted after the Table of Contents."
-      : "Picture will be inserted after the Table of Contents.";
+      ? "PDF page 1 will be inserted before the Table of Contents."
+      : "Picture will be inserted before the Table of Contents.";
     summaryEl.textContent = `${label} — ${detail}`;
     summaryEl.hidden = false;
   };
@@ -2628,6 +2640,26 @@ function installAddressBookPdfInsertFileModal(form) {
       binary += String.fromCharCode(byte);
     });
     return btoa(binary);
+  };
+
+  const pdfBase64Payload = (value) => {
+    const raw = String(value || "").trim();
+    const match = raw.match(/^data:application\/pdf;base64,(.+)$/i);
+    return match ? match[1] : raw.replace(/^data:[^;]+;base64,/i, "");
+  };
+
+  const readStoredCrop = (raw) => {
+    try {
+      const parsed = JSON.parse(String(raw || "") || "null");
+      if (!parsed || typeof parsed !== "object") return { x: 0.5, y: 0.5, zoom: 1 };
+      return {
+        x: Math.min(1, Math.max(0, parseFloat(parsed.x) || 0.5)),
+        y: Math.min(1, Math.max(0, parseFloat(parsed.y) || 0.5)),
+        zoom: Math.min(3, Math.max(1, parseFloat(parsed.zoom) || 1)),
+      };
+    } catch {
+      return { x: 0.5, y: 0.5, zoom: 1 };
+    }
   };
 
   const clampCropState = () => {
@@ -2677,28 +2709,53 @@ function installAddressBookPdfInsertFileModal(form) {
     updateCropPreview();
   };
 
-  const loadImageSourceCover = (src, label) => new Promise((resolve, reject) => {
+  const loadImageSourceCover = (src, label, extra = {}) => new Promise((resolve, reject) => {
     const image = new Image();
     image.onerror = () => reject(new Error("Could not load file preview."));
     image.onload = () => {
-      sourceCover = { src, image, label: label || "File" };
-      cropState = { x: 0.5, y: 0.5, zoom: 1 };
+      sourceCover = { src, image, label: label || "File", ...extra };
+      cropState = extra.crop ? { ...extra.crop } : { x: 0.5, y: 0.5, zoom: 1 };
       drawImagePreview(src);
       resolve(sourceCover);
     };
     image.src = src;
   });
 
-  const rasterizePdfPageToJpegDataUrl = async (base64) => {
+  const cropWindowForSource = (sourceWidth, sourceHeight, outputWidth, outputHeight, crop = cropState) => {
+    const zoom = Math.min(3, Math.max(1, parseFloat(crop?.zoom || 1) || 1));
+    const cropX = Math.min(1, Math.max(0, parseFloat(crop?.x || 0.5) || 0.5));
+    const cropY = Math.min(1, Math.max(0, parseFloat(crop?.y || 0.5) || 0.5));
+    const sourceRatio = sourceWidth / Math.max(sourceHeight, 1);
+    const targetRatio = outputWidth / Math.max(outputHeight, 1);
+    let sw = sourceWidth;
+    let sh = sourceHeight;
+    if (sourceRatio > targetRatio) {
+      sh = sourceHeight / zoom;
+      sw = sh * targetRatio;
+    } else {
+      sw = sourceWidth / zoom;
+      sh = sw / targetRatio;
+    }
+    const maxSx = Math.max(0, sourceWidth - sw);
+    const maxSy = Math.max(0, sourceHeight - sh);
+    return {
+      sx: maxSx * cropX,
+      sy: maxSy * cropY,
+      sw,
+      sh,
+    };
+  };
+
+  const rasterizePdfPageToJpegDataUrl = async (base64, { width, height }, { intent = "display", quality = 0.82, crop = cropState } = {}) => {
     if (!window.pdfjsLib?.getDocument) {
       throw new Error("PDF preview is unavailable.");
     }
-    const { width, height } = trimDimensions();
-    const pdfBytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+    const pdfBytes = Uint8Array.from(atob(pdfBase64Payload(base64)), (char) => char.charCodeAt(0));
     const pdf = await window.pdfjsLib.getDocument({ data: pdfBytes }).promise;
     const page = await pdf.getPage(1);
     const baseViewport = page.getViewport({ scale: 1 });
-    const scale = Math.max(width / baseViewport.width, height / baseViewport.height);
+    const sourceCrop = cropWindowForSource(baseViewport.width, baseViewport.height, width, height, crop);
+    const scale = Math.min(width / Math.max(sourceCrop.sw, 1), 8192 / Math.max(baseViewport.width, baseViewport.height, 1));
     const scaledViewport = page.getViewport({ scale });
     const renderCanvas = document.createElement("canvas");
     renderCanvas.width = Math.ceil(scaledViewport.width);
@@ -2710,6 +2767,7 @@ function installAddressBookPdfInsertFileModal(form) {
     await page.render({
       canvasContext: renderContext,
       viewport: scaledViewport,
+      intent,
     }).promise;
     const outputCanvas = document.createElement("canvas");
     outputCanvas.width = width;
@@ -2718,27 +2776,32 @@ function installAddressBookPdfInsertFileModal(form) {
     if (!outputContext) {
       throw new Error("Could not prepare PDF preview.");
     }
+    outputContext.imageSmoothingEnabled = true;
+    outputContext.imageSmoothingQuality = "high";
     outputContext.fillStyle = "#ffffff";
     outputContext.fillRect(0, 0, width, height);
-    const sourceX = Math.max(0, (renderCanvas.width - width) / 2);
-    const sourceY = Math.max(0, (renderCanvas.height - height) / 2);
     outputContext.drawImage(
       renderCanvas,
-      sourceX,
-      sourceY,
-      width,
-      height,
+      sourceCrop.sx * scale,
+      sourceCrop.sy * scale,
+      sourceCrop.sw * scale,
+      sourceCrop.sh * scale,
       0,
       0,
       width,
       height,
     );
-    return outputCanvas.toDataURL("image/jpeg", 0.9);
+    return outputCanvas.toDataURL("image/jpeg", quality);
   };
 
-  const loadPdfSourceCover = async (base64, label) => {
-    const dataUrl = await rasterizePdfPageToJpegDataUrl(base64);
-    return loadImageSourceCover(dataUrl, label || "PDF");
+  const loadPdfSourceCover = async (base64, label, crop = null) => {
+    const payload = pdfBase64Payload(base64);
+    const dataUrl = await rasterizePdfPageToJpegDataUrl(
+      payload,
+      previewTrimDimensions(),
+      { crop: { x: 0.5, y: 0.5, zoom: 1 } },
+    );
+    return loadImageSourceCover(dataUrl, label || "PDF", { pdfBase64: payload, crop });
   };
 
   const syncInsertForPrint = () => {
@@ -2767,31 +2830,38 @@ function installAddressBookPdfInsertFileModal(form) {
     reader.readAsDataURL(file);
   });
 
-  const sourceToCover = () => {
-    if (!sourceCover?.image) return pendingInsert;
+  const sourceToCover = async () => {
+    if (!sourceCover?.image && !sourceCover?.pdfBase64) return pendingInsert;
     const { width, height } = trimDimensions();
+    if (sourceCover.pdfBase64) {
+      clampCropState();
+      return {
+        data: `data:application/pdf;base64,${sourceCover.pdfBase64}`,
+        width: 0,
+        height: 0,
+        mime: "application/pdf",
+        crop: { x: cropState.x, y: cropState.y, zoom: cropState.zoom },
+        label: sourceCover.label || "PDF",
+      };
+    }
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext("2d");
-    const sourceRatio = sourceCover.image.naturalWidth / sourceCover.image.naturalHeight;
-    const targetRatio = width / height;
-    let sw = sourceCover.image.naturalWidth;
-    let sh = sourceCover.image.naturalHeight;
-    if (sourceRatio > targetRatio) {
-      sh = sourceCover.image.naturalHeight / cropState.zoom;
-      sw = sh * targetRatio;
-    } else {
-      sw = sourceCover.image.naturalWidth / cropState.zoom;
-      sh = sw / targetRatio;
-    }
-    const maxSx = Math.max(0, sourceCover.image.naturalWidth - sw);
-    const maxSy = Math.max(0, sourceCover.image.naturalHeight - sh);
-    const sx = maxSx * cropState.x;
-    const sy = maxSy * cropState.y;
-    ctx.drawImage(sourceCover.image, sx, sy, sw, sh, 0, 0, width, height);
+    if (!ctx) return pendingInsert;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, width, height);
+    const crop = cropWindowForSource(
+      sourceCover.image.naturalWidth,
+      sourceCover.image.naturalHeight,
+      width,
+      height,
+    );
+    ctx.drawImage(sourceCover.image, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, width, height);
     return {
-      data: canvas.toDataURL("image/jpeg", 0.9),
+      data: canvas.toDataURL("image/jpeg", PRINT_JPEG_QUALITY),
       width,
       height,
       mime: "image/jpeg",
@@ -2805,14 +2875,15 @@ function installAddressBookPdfInsertFileModal(form) {
     widthInput.value = insert?.width ? String(insert.width) : "";
     heightInput.value = insert?.height ? String(insert.height) : "";
     labelInput.value = insert?.label || "";
+    cropInput.value = insert?.crop ? JSON.stringify(insert.crop) : "";
     includeCheckbox.checked = Boolean(insert?.data);
     includeValue.value = insert?.data ? "1" : "0";
     syncInsertChoiceVisibility();
     updateSummary();
   };
 
-  const applyCurrentInsert = () => {
-    const cover = sourceToCover();
+  const applyCurrentInsert = async () => {
+    const cover = await sourceToCover();
     if (!cover?.data) return null;
     if (cover.data.length > maxPayloadChars) {
       window.alert("This file is too large to include in the print request.");
@@ -2838,15 +2909,16 @@ function installAddressBookPdfInsertFileModal(form) {
           width: widthInput.value,
           height: heightInput.value,
           label: labelInput.value,
+          crop: readStoredCrop(cropInput.value),
         }
       : readSavedInsert();
     sourceCover = null;
-    cropState = { x: 0.5, y: 0.5, zoom: 1 };
+    cropState = pendingInsert?.crop ? { ...pendingInsert.crop } : { x: 0.5, y: 0.5, zoom: 1 };
     includeCheckbox.checked = includeValue.value === "1" && Boolean(dataInput.value);
     modal.showModal();
     try {
       if (pendingInsert?.mime === "application/pdf" && pendingInsert.data) {
-        await loadPdfSourceCover(pendingInsert.data, pendingInsert.label || "PDF");
+        await loadPdfSourceCover(pendingInsert.data, pendingInsert.label || "PDF", pendingInsert.crop);
         return;
       }
       if (pendingInsert?.data) {
@@ -2916,8 +2988,8 @@ function installAddressBookPdfInsertFileModal(form) {
     window.addEventListener("pointerup", onUp);
   });
 
-  applyButton.addEventListener("click", () => {
-    const insert = applyCurrentInsert();
+  applyButton.addEventListener("click", async () => {
+    const insert = await applyCurrentInsert();
     if (!insert?.data) {
       window.alert("Choose a PDF or picture before applying this file.");
       return;
@@ -2952,10 +3024,7 @@ function installAddressBookPdfInsertFileModal(form) {
   });
 
   const savedInsert = readSavedInsert();
-  if (savedInsert?.mime === "application/pdf") {
-    window.localStorage.removeItem(savedInsertStorageKey);
-    syncInsertChoiceVisibility();
-  } else if (savedInsert?.data) {
+  if (savedInsert?.data) {
     setStoredInsert(savedInsert);
   } else {
     syncInsertChoiceVisibility();

@@ -5,6 +5,7 @@ import math
 import re
 import base64
 import binascii
+import zlib
 from html import unescape
 from html.parser import HTMLParser
 from dataclasses import dataclass, field
@@ -357,6 +358,7 @@ class _PdfImage:
     width: float
     height: float
     rotate_180: bool = False
+    filter_name: str = "DCTDecode"
 
 
 @dataclass
@@ -423,11 +425,12 @@ class _PdfWriter:
             xobject_refs: dict[str, int] = {}
             for index, image in enumerate(page.images, start=1):
                 image_name = f"Im{index}"
+                image_filter = "FlateDecode" if image.filter_name == "FlateDecode" else "DCTDecode"
                 image_ref = add_object(
                     (
                         f"<< /Type /XObject /Subtype /Image /Width {max(1, image.pixel_width)} "
                         f"/Height {max(1, image.pixel_height)} /ColorSpace /DeviceRGB "
-                        f"/BitsPerComponent 8 /Filter /DCTDecode /Length {len(image.data)} >>\nstream\n"
+                        f"/BitsPerComponent 8 /Filter /{image_filter} /Length {len(image.data)} >>\nstream\n"
                     ).encode("latin-1")
                     + image.data
                     + b"\nendstream"
@@ -942,10 +945,137 @@ def _full_bleed_image_page(
     pixel_height: int,
     page_width: float,
     page_height: float,
+    *,
+    filter_name: str = "DCTDecode",
 ) -> _PdfPage:
     page = _PdfPage(page_width, page_height)
-    page.images.append(_PdfImage(image_data, pixel_width, pixel_height, 0, 0, page_width, page_height))
+    page.images.append(
+        _PdfImage(
+            image_data,
+            pixel_width,
+            pixel_height,
+            0,
+            0,
+            page_width,
+            page_height,
+            filter_name=filter_name,
+        )
+    )
     return page
+
+
+def _parse_insert_crop(raw: object) -> dict[str, float]:
+    values = {"x": 0.5, "y": 0.5, "zoom": 1.0}
+    if isinstance(raw, dict):
+        payload = raw
+    else:
+        text = _clean(raw)
+        if not text:
+            return values
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return values
+        payload = parsed if isinstance(parsed, dict) else {}
+    try:
+        values["x"] = min(1.0, max(0.0, float(payload.get("x", 0.5))))
+    except (TypeError, ValueError):
+        pass
+    try:
+        values["y"] = min(1.0, max(0.0, float(payload.get("y", 0.5))))
+    except (TypeError, ValueError):
+        pass
+    try:
+        values["zoom"] = min(3.0, max(1.0, float(payload.get("zoom", 1.0))))
+    except (TypeError, ValueError):
+        pass
+    return values
+
+
+def _insert_crop_window(
+    source_width: float,
+    source_height: float,
+    output_width: float,
+    output_height: float,
+    crop: dict[str, float],
+) -> tuple[float, float, float, float]:
+    zoom = max(1.0, float(crop.get("zoom") or 1.0))
+    crop_x = min(1.0, max(0.0, float(crop.get("x") or 0.5)))
+    crop_y = min(1.0, max(0.0, float(crop.get("y") or 0.5)))
+    source_ratio = source_width / max(source_height, 1.0)
+    target_ratio = output_width / max(output_height, 1.0)
+    if source_ratio > target_ratio:
+        sh = source_height / zoom
+        sw = sh * target_ratio
+    else:
+        sw = source_width / zoom
+        sh = sw / target_ratio
+    sx = max(0.0, source_width - sw) * crop_x
+    sy = max(0.0, source_height - sh) * crop_y
+    return sx, sy, sw, sh
+
+
+def _pixmap_packed_rgb(pixmap) -> bytes:
+    width = int(pixmap.width)
+    height = int(pixmap.height)
+    n = int(pixmap.n)
+    stride = int(pixmap.stride)
+    row_bytes = width * n
+    samples = bytes(pixmap.samples)
+    if n != 3:
+        raise ValueError("print pixmap must be RGB")
+    if stride == row_bytes:
+        return samples
+    packed = bytearray(height * row_bytes)
+    for row in range(height):
+        start = row * stride
+        packed[row * row_bytes : (row + 1) * row_bytes] = samples[start : start + row_bytes]
+    return bytes(packed)
+
+
+def _pdf_page_to_print_image(
+    pdf_bytes: bytes,
+    page_width: float,
+    page_height: float,
+    crop: dict[str, float] | None = None,
+) -> tuple[bytes, int, int, str] | None:
+    try:
+        from app.services.pymupdf_runtime import PymupdfUnavailableError, ensure_pymupdf
+
+        ensure_pymupdf()
+        import fitz
+    except (ImportError, PymupdfUnavailableError):
+        return None
+    if not pdf_bytes:
+        return None
+    document = None
+    try:
+        document = fitz.open(stream=pdf_bytes, filetype="pdf")
+        if document.page_count < 1:
+            return None
+        page = document[0]
+        source_rect = page.rect
+        sx, sy, sw, sh = _insert_crop_window(
+            source_rect.width,
+            source_rect.height,
+            page_width,
+            page_height,
+            crop or {"x": 0.5, "y": 0.5, "zoom": 1.0},
+        )
+        clip = fitz.Rect(source_rect.x0 + sx, source_rect.y0 + sy, source_rect.x0 + sx + sw, source_rect.y0 + sy + sh)
+        pixel_width = max(1, int(page_width * (600.0 / 72.0)))
+        pixel_height = max(1, int(page_height * (600.0 / 72.0)))
+        matrix = fitz.Matrix(pixel_width / max(clip.width, 1.0), pixel_height / max(clip.height, 1.0))
+        pixmap = page.get_pixmap(matrix=matrix, clip=clip, alpha=False)
+        if pixmap.n != 3:
+            pixmap = fitz.Pixmap(fitz.csRGB, pixmap)
+        packed = _pixmap_packed_rgb(pixmap)
+        return zlib.compress(packed, 9), int(pixmap.width), int(pixmap.height), "FlateDecode"
+    except Exception:
+        return None
+    finally:
+        if document is not None:
+            document.close()
 
 
 def _pdf_first_page_to_jpeg(pdf_bytes: bytes, page_width: float, page_height: float) -> tuple[bytes, int, int] | None:
@@ -963,8 +1093,8 @@ def _pdf_first_page_to_jpeg(pdf_bytes: bytes, page_width: float, page_height: fl
         if document.page_count < 1:
             return None
         page = document[0]
-        pixel_width = max(1, int(page_width * (300.0 / 72.0)))
-        pixel_height = max(1, int(page_height * (300.0 / 72.0)))
+        pixel_width = max(1, int(page_width * (600.0 / 72.0)))
+        pixel_height = max(1, int(page_height * (600.0 / 72.0)))
         source_rect = page.rect
         scale = max(pixel_width / max(source_rect.width, 1.0), pixel_height / max(source_rect.height, 1.0))
         pixmap = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
@@ -976,7 +1106,7 @@ def _pdf_first_page_to_jpeg(pdf_bytes: bytes, page_width: float, page_height: fl
             clip = fitz.IRect(clip_x, clip_y, clip_x + pixel_width, clip_y + pixel_height)
             cropped = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, pixel_width, pixel_height), 0)
             cropped.copy(pixmap, clip)
-        jpeg_bytes = cropped.tobytes("jpeg", jpg_quality=90)
+        jpeg_bytes = cropped.tobytes("jpeg", jpg_quality=95)
         return jpeg_bytes, cropped.width, cropped.height
     except (RuntimeError, ValueError, TypeError):
         return None
@@ -991,17 +1121,32 @@ def _build_insert_pages(
     insert_file_height: int | str,
     page_width: float,
     page_height: float,
+    insert_file_crop: object = None,
 ) -> list[_PdfPage]:
     if not include_insert_file:
         return []
     mime = _clean(insert_file_mime).lower()
+    crop = _parse_insert_crop(insert_file_crop)
     if mime == "application/pdf":
         pdf_bytes = _decode_base64_payload(insert_file_data)
-        rendered = _pdf_first_page_to_jpeg(pdf_bytes or b"", page_width, page_height) if pdf_bytes else None
+        rendered = _pdf_page_to_print_image(pdf_bytes or b"", page_width, page_height, crop) if pdf_bytes else None
         if not rendered:
-            return []
-        image_data, pixel_width, pixel_height = rendered
-        return [_full_bleed_image_page(image_data, pixel_width, pixel_height, page_width, page_height)]
+            fallback = _pdf_first_page_to_jpeg(pdf_bytes or b"", page_width, page_height) if pdf_bytes else None
+            if not fallback:
+                return []
+            image_data, pixel_width, pixel_height = fallback
+            return [_full_bleed_image_page(image_data, pixel_width, pixel_height, page_width, page_height)]
+        image_data, pixel_width, pixel_height, filter_name = rendered
+        return [
+            _full_bleed_image_page(
+                image_data,
+                pixel_width,
+                pixel_height,
+                page_width,
+                page_height,
+                filter_name=filter_name,
+            )
+        ]
     cover_image = _cover_image_from_data_url(insert_file_data, insert_file_width, insert_file_height)
     if not cover_image:
         return []
@@ -1034,11 +1179,13 @@ def _build_toc_pages(
     margin_bottom: float,
     base_font_size: float,
     page_offset: int,
+    link_page_offset: int | None = None,
     compact: bool = False,
     font_family: str = "Arial",
 ) -> list[_PdfPage]:
     if not entries:
         return []
+    link_offset = page_offset if link_page_offset is None else int(link_page_offset)
 
     def tw(text: str, size: float) -> float:
         return _text_width(text, size, font_family)
@@ -1099,7 +1246,7 @@ def _build_toc_pages(
             entry.toc_page_index = len(toc_pages) - 1
             display_page = str(entry.page + page_offset)
             page_text_width = tw(display_page, item_size)
-            target_page_index = max(0, entry.page + page_offset - 1)
+            target_page_index = max(0, entry.page + link_offset - 1)
             item_text = fit(entry.meeting_heading, field_size, content_width - page_number_width - item_size)
             item_width = tw(item_text, field_size)
             dots_x = margin_left + item_width + (item_size * 0.35)
@@ -1123,7 +1270,7 @@ def _build_toc_pages(
             y -= line_step
         display_page = str(entry.page + page_offset)
         page_text_width = tw(display_page, item_size)
-        target_page_index = max(0, entry.page + page_offset - 1)
+        target_page_index = max(0, entry.page + link_offset - 1)
         entry.toc_page_index = len(toc_pages) - 1
         text_x = margin_left + indent
         item_text = fit(entry.meeting_heading, item_size, item_max_width)
@@ -1166,6 +1313,7 @@ def _build_index_pages(
     base_font_size: float,
     start_page_number: int,
     title_link_page_index: int | None = None,
+    link_page_offset: int = 0,
     compact: bool = False,
     font_family: str = "Arial",
 ) -> list[_PdfPage]:
@@ -1238,7 +1386,7 @@ def _build_index_pages(
 
         display_page = str(entry.page)
         page_text_width = tw(display_page, item_size)
-        target_page_index = max(0, entry.page - 1)
+        target_page_index = max(0, entry.page + int(link_page_offset) - 1)
         name_text = fit(entry.name, item_size, name_max_width)
         name_width = tw(name_text, item_size)
         dots_x = margin_left + name_width + (item_size * 0.35)
@@ -1454,6 +1602,7 @@ def _clone_page_into_slot(
                     image.width,
                     image.height,
                     rotate_180=not image.rotate_180,
+                    filter_name=image.filter_name,
                 )
             )
         else:
@@ -1467,6 +1616,7 @@ def _clone_page_into_slot(
                     image.width,
                     image.height,
                     rotate_180=image.rotate_180,
+                    filter_name=image.filter_name,
                 )
             )
 
@@ -1493,7 +1643,13 @@ def _clone_page_into_slot(
         )
 
 
-def _impose_pages_to_letter(pages: list[_PdfPage], binding: str, font_family: str = "Arial") -> list[_PdfPage]:
+def _impose_pages_to_letter(
+    pages: list[_PdfPage],
+    binding: str,
+    font_family: str = "Arial",
+    *,
+    include_cut_marks: bool = True,
+) -> list[_PdfPage]:
     if not pages:
         return []
     mode = _clean(binding).lower()
@@ -1528,7 +1684,8 @@ def _impose_pages_to_letter(pages: list[_PdfPage], binding: str, font_family: st
                     content_offset_x=fold_offset_x,
                     font_family=font_family,
                 )
-            _draw_cut_marks(sheet, page_width, page_height, right_justify=(side == "back"))
+            if include_cut_marks:
+                _draw_cut_marks(sheet, page_width, page_height, right_justify=(side == "back"))
             imposed_pages.append(sheet)
 
     return imposed_pages
@@ -1564,7 +1721,9 @@ def build_address_book_pdf(
     insert_file_mime: str = "",
     insert_file_width: int | str = 0,
     insert_file_height: int | str = 0,
+    insert_file_crop: object = None,
     paper_book_binding: str = "",
+    paper_book_cut_marks: bool = True,
 ) -> bytes:
     ordered_fields = order_address_book_fields(fields, print_order_mode, print_order_json)
     page_width = max(72.0, float(layout.get("trim_width_in") or 3.5) * 72.0)
@@ -2147,6 +2306,7 @@ def build_address_book_pdf(
         insert_file_height=insert_file_height,
         page_width=page_width,
         page_height=page_height,
+        insert_file_crop=insert_file_crop,
     )
     insert_page_count = len(insert_pages)
     compact_toc_index = bool(_clean(paper_book_binding))
@@ -2160,6 +2320,7 @@ def build_address_book_pdf(
         toc_pages: list[_PdfPage] = []
         toc_page_count = 0
         for _ in range(4):
+            display_offset = toc_page_count + front_page_count
             toc_pages = _build_toc_pages(
                 entries=all_toc_entries,
                 book_title=str(layout.get("book_title") or "Address Book"),
@@ -2170,19 +2331,22 @@ def build_address_book_pdf(
                 margin_top=margin_top,
                 margin_bottom=margin_bottom,
                 base_font_size=font_size,
-                page_offset=toc_page_count + front_page_count + insert_page_count,
+                page_offset=display_offset,
+                link_page_offset=display_offset + insert_page_count,
                 compact=compact_toc_index,
                 font_family=font_family,
             )
             if len(toc_pages) == toc_page_count:
                 break
             toc_page_count = len(toc_pages)
-        _shift_content_footers(writer.pages, len(toc_pages) + front_page_count + insert_page_count, font_family)
+        display_offset = len(toc_pages) + front_page_count
+        _shift_content_footers(writer.pages, display_offset, font_family)
+        toc_start_index = front_page_count + insert_page_count
         for entry in toc_entries:
             for heading_line in entry.heading_lines:
-                heading_line.link_page_index = front_page_count + entry.toc_page_index
+                heading_line.link_page_index = toc_start_index + entry.toc_page_index
         for entry in index_entries:
-            entry.page += len(toc_pages) + front_page_count + insert_page_count
+            entry.page += display_offset
         index_pages = _build_index_pages(
             entries=index_entries,
             page_width=page_width,
@@ -2192,8 +2356,9 @@ def build_address_book_pdf(
             margin_top=margin_top,
             margin_bottom=margin_bottom,
             base_font_size=font_size,
-            start_page_number=front_page_count + len(toc_pages) + insert_page_count + content_page_count + 1,
-            title_link_page_index=front_page_count + index_toc_entry.toc_page_index if index_toc_entry else None,
+            start_page_number=display_offset + content_page_count + 1,
+            title_link_page_index=toc_start_index + index_toc_entry.toc_page_index if index_toc_entry else None,
+            link_page_offset=insert_page_count,
             compact=compact_toc_index,
             font_family=font_family,
         )
@@ -2278,9 +2443,14 @@ def build_address_book_pdf(
                     )
                 )
             cover_pages.append(cover_page)
-        writer.pages = cover_pages + toc_pages + insert_pages + writer.pages + index_pages
+        writer.pages = cover_pages + insert_pages + toc_pages + writer.pages + index_pages
     if _clean(paper_book_binding).lower() == "side_spiral":
         _mirror_side_spiral_even_page_margins(writer.pages, margin_left, margin_right)
     if _clean(paper_book_binding):
-        writer.pages = _impose_pages_to_letter(writer.pages, paper_book_binding, font_family)
+        writer.pages = _impose_pages_to_letter(
+            writer.pages,
+            paper_book_binding,
+            font_family,
+            include_cut_marks=bool(paper_book_cut_marks),
+        )
     return writer.bytes()

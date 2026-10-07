@@ -746,6 +746,13 @@
   background: #c8f0cb;
 }
 
+.address-book-pdf-paper-book-options {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px 12px;
+  align-items: start;
+}
+
 .address-book-pdf-paper-book-block .address-book-pdf-choice-column {
   padding: 0;
   border: 0;
