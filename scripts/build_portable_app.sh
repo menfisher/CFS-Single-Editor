@@ -747,8 +747,17 @@ SCRIPT
 
 APP_VERSION="$(tr -d '[:space:]' < "$ROOT_DIR/APP_VERSION")"
 APP_VERSION="${APP_VERSION:-1.0}"
-MAC_PACKAGE="ContactsFreeShare-${APP_VERSION}-mac.zip"
-WINDOWS_PACKAGE="ContactsFreeShare-${APP_VERSION}-windows.zip"
+APP_EDITION="$(tr -d '[:space:]' < "$ROOT_DIR/APP_EDITION" 2>/dev/null || true)"
+if [ "$APP_EDITION" = "single-editor" ]; then
+  PACKAGE_PREFIX="ContactsFreeShare-SingleEditor"
+elif [ "$APP_EDITION" = "multi-editor" ]; then
+  PACKAGE_PREFIX="ContactsFreeShare-MultiEditor"
+else
+  PACKAGE_PREFIX="ContactsFreeShare"
+fi
+printf '%s\n' "${APP_EDITION:-single-editor}" > "$APP_DIR/APP_EDITION"
+MAC_PACKAGE="${PACKAGE_PREFIX}-${APP_VERSION}-mac.zip"
+WINDOWS_PACKAGE="${PACKAGE_PREFIX}-${APP_VERSION}-windows.zip"
 PUBLIC_MANIFEST_URL="${CONTACTSFREESHARE_UPDATE_MANIFEST_URL:-}"
 CLEAN_UPDATE_PACKAGES="${CONTACTSFREESHARE_CLEAN_UPDATE_PACKAGES:-1}"
 BUILD_MAC_PACKAGE="${CONTACTSFREESHARE_BUILD_MAC_PACKAGE:-1}"
@@ -795,6 +804,7 @@ cat <<SCRIPT
 {
   "format": "contactsfreeshare.app_update.v1",
   "latest_version": "$APP_VERSION",
+  "edition": "${APP_EDITION:-single-editor}",
   "release_date": "$(date '+%Y-%m-%d')",
   "notes": "Describe what changed in this release.",
   "packages": {

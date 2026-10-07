@@ -3,10 +3,20 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="$ROOT_DIR/dist"
-UPDATE_REPO="${CONTACTSFREESHARE_UPDATE_REPO:-menfisher/contactsfreeshare-se-updates}"
+UPDATE_REPO="menfisher/contactsfreeshare-se-updates"
+UPDATE_BASE_URL="https://menfisher.github.io/contactsfreeshare-se-updates"
+if [[ "${CONTACTSFREESHARE_UPDATE_REPO:-}" == "menfisher/contactsfreeshare-se-updates" ]]; then
+  UPDATE_REPO="$CONTACTSFREESHARE_UPDATE_REPO"
+fi
+if [[ "${CONTACTSFREESHARE_UPDATE_BASE_URL:-}" == *"contactsfreeshare-se-updates"* ]]; then
+  UPDATE_BASE_URL="$CONTACTSFREESHARE_UPDATE_BASE_URL"
+fi
 UPDATE_REPO_URL="${CONTACTSFREESHARE_UPDATE_REPO_URL:-git@github.com:${UPDATE_REPO}.git}"
-UPDATE_BASE_URL="${CONTACTSFREESHARE_UPDATE_BASE_URL:-https://menfisher.github.io/contactsfreeshare-se-updates}"
-UPDATE_MANIFEST_URL="${CONTACTSFREESHARE_UPDATE_MANIFEST_URL:-$UPDATE_BASE_URL/app_update_manifest.json}"
+if [[ "${CONTACTSFREESHARE_UPDATE_MANIFEST_URL:-}" == *"contactsfreeshare-se-updates"* ]]; then
+  UPDATE_MANIFEST_URL="$CONTACTSFREESHARE_UPDATE_MANIFEST_URL"
+else
+  UPDATE_MANIFEST_URL="$UPDATE_BASE_URL/app_update_manifest.json"
+fi
 KEEP_OLD_PACKAGES="${CONTACTSFREESHARE_KEEP_OLD_UPDATE_PACKAGES:-0}"
 ALLOW_EXISTING_VERSION="${CONTACTSFREESHARE_ALLOW_EXISTING_VERSION:-0}"
 VERSION="${1:-}"
@@ -101,8 +111,16 @@ CONTACTSFREESHARE_UPDATE_MANIFEST_URL="$UPDATE_MANIFEST_URL" bash "$ROOT_DIR/scr
 
 MANIFEST_TEMPLATE="$BUILD_DIR/app_update_manifest.example.json"
 MANIFEST_FILE="$BUILD_DIR/app_update_manifest.json"
-MAC_PACKAGE="$BUILD_DIR/ContactsFreeShare-${VERSION}-mac.zip"
-WINDOWS_PACKAGE="$BUILD_DIR/ContactsFreeShare-${VERSION}-windows.zip"
+APP_EDITION="$(tr -d '[:space:]' < "$ROOT_DIR/APP_EDITION" 2>/dev/null || true)"
+if [[ "$APP_EDITION" == "single-editor" ]]; then
+  PACKAGE_PREFIX="ContactsFreeShare-SingleEditor"
+elif [[ "$APP_EDITION" == "multi-editor" ]]; then
+  PACKAGE_PREFIX="ContactsFreeShare-MultiEditor"
+else
+  PACKAGE_PREFIX="ContactsFreeShare"
+fi
+MAC_PACKAGE="$BUILD_DIR/${PACKAGE_PREFIX}-${VERSION}-mac.zip"
+WINDOWS_PACKAGE="$BUILD_DIR/${PACKAGE_PREFIX}-${VERSION}-windows.zip"
 
 if [[ ! -f "$MANIFEST_TEMPLATE" || ! -f "$MAC_PACKAGE" || ! -f "$WINDOWS_PACKAGE" ]]; then
   echo "Error: expected build output was not found in $BUILD_DIR."

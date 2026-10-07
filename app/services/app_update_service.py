@@ -7,13 +7,19 @@ import shutil
 import subprocess
 import sys
 import time
+import zipfile
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 
 from app.config import APP_DATA_DIR, DB_PATH, ERROR_LOG_PATH, PROJECT_ROOT, SINGLE_EDITOR_ONLY
-from app.services.app_info_service import get_current_app_version
+from app.services.app_info_service import (
+    get_app_edition,
+    get_current_app_version,
+    get_expected_update_manifest_url,
+    update_manifest_url_matches_edition,
+)
 from app.services.google_sync_service import (
     download_app_update_package_from_google_drive,
     get_google_sync_summary,
@@ -137,18 +143,33 @@ def _is_placeholder_manifest_url(url: str) -> bool:
     return any(part in normalized_url for part in PLACEHOLDER_MANIFEST_URL_PARTS)
 
 
-def _get_public_manifest_url() -> str:
-    # Prefer .env files over a stale process environment value left from an earlier launch.
+def _candidate_manifest_urls() -> list[str]:
+    urls: list[str] = []
     dotenv_manifest_url = _read_dotenv_value(UPDATE_MANIFEST_URL_ENV)
-    if dotenv_manifest_url and not _is_placeholder_manifest_url(dotenv_manifest_url):
-        return dotenv_manifest_url
-    manifest_url = str(os.getenv(UPDATE_MANIFEST_URL_ENV) or "").strip()
-    if manifest_url and not _is_placeholder_manifest_url(manifest_url):
-        return manifest_url
+    if dotenv_manifest_url:
+        urls.append(dotenv_manifest_url)
+    env_manifest_url = str(os.getenv(UPDATE_MANIFEST_URL_ENV) or "").strip()
+    if env_manifest_url:
+        urls.append(env_manifest_url)
     try:
-        return UPDATE_MANIFEST_URL_FILE.read_text(encoding="utf-8").strip()
+        file_manifest_url = UPDATE_MANIFEST_URL_FILE.read_text(encoding="utf-8").strip()
     except OSError:
-        return ""
+        file_manifest_url = ""
+    if file_manifest_url:
+        urls.append(file_manifest_url)
+    urls.append(get_expected_update_manifest_url())
+    return urls
+
+
+def _get_public_manifest_url() -> str:
+    # Never follow the other edition's feed, even if a leftover .env or shell
+    # variable still points at it.
+    for manifest_url in _candidate_manifest_urls():
+        if _is_placeholder_manifest_url(manifest_url):
+            continue
+        if update_manifest_url_matches_edition(manifest_url):
+            return manifest_url
+    return get_expected_update_manifest_url()
 
 
 def _load_update_manifest() -> tuple[dict, str]:
@@ -178,6 +199,10 @@ def _load_update_manifest() -> tuple[dict, str]:
         if str(account.get("status") or "") == "connected" and bool(account.get("drive_scope_ready")):
             drive_payload = import_app_update_manifest_from_google_drive()
             drive_manifest = dict(drive_payload.get("manifest") or {})
+            if drive_manifest:
+                drive_edition = str(drive_manifest.get("edition") or "").strip().lower()
+                if drive_edition and drive_edition != get_app_edition():
+                    drive_manifest = {}
             if drive_manifest:
                 if manifest_url and not _is_placeholder_manifest_url(manifest_url):
                     drive_manifest["_manifest_url"] = manifest_url
@@ -223,6 +248,7 @@ def normalize_update_manifest(manifest: dict) -> dict:
         "latest_version": str(manifest.get("latest_version") or "").strip(),
         "release_date": str(manifest.get("release_date") or "").strip(),
         "notes": str(manifest.get("notes") or "").strip(),
+        "edition": str(manifest.get("edition") or "").strip().lower(),
         "packages": normalized_packages,
     }
 
@@ -246,6 +272,19 @@ def get_app_update_status() -> dict:
         }
 
     latest_version = manifest["latest_version"]
+    manifest_edition = str(manifest.get("edition") or "").strip().lower()
+    current_edition = get_app_edition()
+    if manifest_edition and manifest_edition != current_edition:
+        return {
+            "ok": False,
+            "source": source,
+            "current_version": current_version,
+            "latest_version": latest_version,
+            "platform": platform_key,
+            "update_available": False,
+            "packages": {},
+            "message": "This update belongs to a different ContactsFreeShare edition and will not be installed.",
+        }
     version_comparison = _compare_versions(latest_version, current_version) if latest_version else 0
     update_available = bool(latest_version) and version_comparison > 0
     installed_newer_than_latest = bool(latest_version) and version_comparison < 0
@@ -319,15 +358,36 @@ def _download_update_package_to_staging(platform_key: str) -> tuple[Path, dict]:
     return zip_path, package
 
 
+def _read_zip_app_edition(zip_path: Path) -> str:
+    try:
+        with zipfile.ZipFile(zip_path) as archive:
+            with archive.open("ContactsFreeShare/APP_EDITION") as handle:
+                return handle.read().decode("utf-8").strip().lower()
+    except (OSError, KeyError, zipfile.BadZipFile, UnicodeDecodeError):
+        return ""
+
+
+def _assert_update_zip_matches_edition(zip_path: Path) -> None:
+    package_edition = _read_zip_app_edition(zip_path)
+    current_edition = get_app_edition()
+    if package_edition and package_edition != current_edition:
+        raise RuntimeError(
+            f"Refusing to install {package_edition} over {current_edition}. "
+            "Single Editor and Multi-Editor updates cannot replace each other."
+        )
+
+
 def _write_mac_update_script(zip_path: Path) -> Path:
     script_path = UPDATE_STAGING_DIR / f"install_contactsfreeshare_update_{int(time.time())}.command"
     log_path = UPDATE_STAGING_DIR / "install_update.log"
+    expected_edition = get_app_edition()
     script_path.write_text(
         f"""#!/usr/bin/env bash
 set -euo pipefail
 APP_DIR={str(PROJECT_ROOT)!r}
 ZIP_PATH={str(zip_path)!r}
 LOG_PATH={str(log_path)!r}
+EXPECTED_EDITION={expected_edition!r}
 exec > "$LOG_PATH" 2>&1
 sleep 3
 PARENT_DIR="$(dirname "$APP_DIR")"
@@ -340,6 +400,12 @@ if [ ! -d "$NEW_APP_DIR" ]; then
   echo "Update package did not contain ContactsFreeShare."
   exit 1
 fi
+PACKAGE_EDITION="$(tr -d '[:space:]' < "$NEW_APP_DIR/APP_EDITION" 2>/dev/null || true)"
+if [ -n "$PACKAGE_EDITION" ] && [ "$PACKAGE_EDITION" != "$EXPECTED_EDITION" ]; then
+  echo "Refusing update: package is $PACKAGE_EDITION, this app is $EXPECTED_EDITION."
+  rm -rf "$TMP_DIR"
+  exit 1
+fi
 mv "$APP_DIR" "$BACKUP_DIR"
 mv "$NEW_APP_DIR" "$APP_DIR"
 if [ -d "$BACKUP_DIR/runtime" ]; then
@@ -348,6 +414,30 @@ if [ -d "$BACKUP_DIR/runtime" ]; then
 fi
 if [ -f "$BACKUP_DIR/.env" ]; then
   cp "$BACKUP_DIR/.env" "$APP_DIR/.env"
+fi
+if [ -f "$APP_DIR/UPDATE_MANIFEST_URL" ]; then
+  FEED="$(tr -d '[:space:]' < "$APP_DIR/UPDATE_MANIFEST_URL")"
+  if [ -n "$FEED" ]; then
+    python3 - "$APP_DIR/.env" "$FEED" <<'PY'
+from pathlib import Path
+import sys
+env_path = Path(sys.argv[1])
+feed = sys.argv[2].strip()
+key = "CONTACTSFREESHARE_UPDATE_MANIFEST_URL="
+lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+out = []
+found = False
+for line in lines:
+    if line.strip().startswith(key):
+        out.append(key + feed)
+        found = True
+    else:
+        out.append(line)
+if not found:
+    out.append(key + feed)
+env_path.write_text("\\n".join(out) + "\\n", encoding="utf-8")
+PY
+  fi
 fi
 chmod +x "$APP_DIR/Start ContactsFreeShare.command" || true
 rm -rf "$TMP_DIR"
@@ -365,6 +455,7 @@ def _write_windows_update_script(zip_path: Path) -> Path:
     app_dir = PROJECT_ROOT.resolve().as_posix()
     zip_file = zip_path.resolve().as_posix()
     log_file = log_path.resolve().as_posix()
+    expected_edition = get_app_edition()
     script_path.write_text(
         f"""@echo off
 setlocal EnableExtensions
@@ -412,6 +503,14 @@ if not exist "%NEW_APP_DIR%" (
   echo Update package did not contain ContactsFreeShare folder. >> "%LOG_PATH%"
   echo Update failed. Full log file: %LOG_PATH% >> "%LOG_PATH%"
 exit /b 1
+)
+if exist "%NEW_APP_DIR%\\APP_EDITION" (
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "if ((Get-Content -LiteralPath (Join-Path $env:NEW_APP_DIR 'APP_EDITION') -TotalCount 1).Trim().ToLower() -ne '{expected_edition}') {{ throw 'wrong edition' }}" >> "%LOG_PATH%" 2>&1
+  if errorlevel 1 (
+    echo Refusing update: package is a different ContactsFreeShare edition. >> "%LOG_PATH%"
+    echo Update failed. Full log file: %LOG_PATH% >> "%LOG_PATH%"
+    exit /b 1
+  )
 )
 set /a MOVE_TRY=0
 :retry_move_out
@@ -490,6 +589,7 @@ def stage_app_update_install(platform_key: str) -> dict:
     if not _is_packaged_build():
         raise RuntimeError("Automatic install is only available from a packaged ContactsFreeShare app.")
     zip_path, package = _download_update_package_to_staging(requested_platform)
+    _assert_update_zip_matches_edition(zip_path)
     if current_platform == "mac":
         script_path = _write_mac_update_script(zip_path)
         subprocess.Popen(["/bin/bash", str(script_path)], cwd=str(UPDATE_STAGING_DIR), start_new_session=True)
