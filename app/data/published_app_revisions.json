@@ -2,8 +2,13 @@
   "format": "contactsfreeshare.published_revisions.v1",
   "revisions": [
     {
-      "version": "1.239",
+      "version": "1.239.1",
       "date_display": "10/9/2026",
+      "description": "Say ContactsFreeShare stores contacts in Google Contacts as an option, instead of sharing them with other Google accounts."
+    },
+    {
+      "date_display": "10/9/2026",
+      "version": "1.239",
       "description": "Raise the address book field/page footer off the cut edge without reflowing the contacts above it."
     },
     {
