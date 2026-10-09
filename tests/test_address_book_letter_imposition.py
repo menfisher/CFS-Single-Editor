@@ -9,6 +9,7 @@ from app.services.address_book_pdf_service import (
     _letter_block_offset_x,
     _letter_positions,
     _mirror_side_spiral_even_page_margins,
+    _page_footer_y,
 )
 
 
@@ -68,6 +69,12 @@ class AddressBookLetterImpositionTests(unittest.TestCase):
         imposed = _impose_pages_to_letter(pages, "side_spiral")
         self.assertTrue(imposed)
         self.assertGreater(sum(len(page.rules) for page in imposed), 0)
+
+    def test_page_footer_sits_above_the_old_half_margin_without_entering_content(self) -> None:
+        margin_bottom = 0.14 * 72.0
+        footer_y = _page_footer_y(margin_bottom)
+        self.assertGreater(footer_y, margin_bottom / 2.0)
+        self.assertLess(footer_y, margin_bottom)
 
     def test_imposed_sheets_can_omit_cut_marks(self) -> None:
         pages = [_PdfPage(3.5 * 72.0, 5.0 * 72.0) for _ in range(4)]

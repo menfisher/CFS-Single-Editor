@@ -1167,6 +1167,17 @@ def _cover_title_lines(text: object, size: float, max_width: float) -> list[str]
     return [line.rstrip() for line in str(text or "").splitlines() if line.strip()]
 
 
+# Field/page footers used to sit at margin_bottom / 2, which prints too close to
+# the cut edge. Lift them inside the unused bottom band. Content pagination still
+# keys off margin_bottom, so body lines do not reflow.
+_PAGE_FOOTER_LIFT_PT = 4.0
+
+
+def _page_footer_y(margin_bottom: float) -> float:
+    half = float(margin_bottom) * 0.5
+    return min(half + _PAGE_FOOTER_LIFT_PT, max(half, float(margin_bottom) - 1.0))
+
+
 def _build_toc_pages(
     *,
     entries: list[_TocEntry],
@@ -1231,7 +1242,7 @@ def _build_toc_pages(
             _PdfLine(
                 text,
                 x=max(margin_left, (page_width - tw(text, item_size)) / 2),
-                y=margin_bottom / 2,
+                y=_page_footer_y(margin_bottom),
                 size=item_size,
             )
         )
@@ -1364,7 +1375,7 @@ def _build_index_pages(
             _PdfLine(
                 text,
                 x=max(margin_left, (page_width - tw(text, item_size)) / 2),
-                y=margin_bottom / 2,
+                y=_page_footer_y(margin_bottom),
                 size=item_size,
             )
         )
@@ -1854,7 +1865,15 @@ def build_address_book_pdf(
 
     def add_footer(field_name: str) -> None:
         text = f"{field_name or 'All Fields'} - Page {page_number}"
-        page.lines.append(_PdfLine(text=text, x=max(margin_left, (page_width - tw(text, font_size)) / 2), y=margin_bottom / 2, size=font_size, bold=True))
+        page.lines.append(
+            _PdfLine(
+                text=text,
+                x=max(margin_left, (page_width - tw(text, font_size)) / 2),
+                y=_page_footer_y(margin_bottom),
+                size=font_size,
+                bold=True,
+            )
+        )
 
     def _continued_heading_text(meeting_heading: str) -> str:
         return f"{meeting_heading} - (continued)"
