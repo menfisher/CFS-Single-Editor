@@ -2,8 +2,13 @@
   "format": "contactsfreeshare.published_revisions.v1",
   "revisions": [
     {
-      "version": "1.238",
+      "version": "1.239",
+      "date_display": "10/9/2026",
+      "description": "Raise the address book field/page footer off the cut edge without reflowing the contacts above it."
+    },
+    {
       "date_display": "10/7/2026",
+      "version": "1.238",
       "description": "Keep Single Editor and Multi-Editor from replacing each other. About now shows Single Editor, and update packages are named SingleEditor."
     },
     {
