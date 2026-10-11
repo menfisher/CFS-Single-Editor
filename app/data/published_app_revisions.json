@@ -2,8 +2,13 @@
   "format": "contactsfreeshare.published_revisions.v1",
   "revisions": [
     {
-      "version": "1.239.1",
+      "version": "1.240",
+      "date_display": "10/11/2026",
+      "description": "Print the chosen address book font in the PDF and paper book. The insert before the table of contents uses the book margins. The error log keeps only recent messages."
+    },
+    {
       "date_display": "10/9/2026",
+      "version": "1.239.1",
       "description": "Say ContactsFreeShare stores contacts in Google Contacts as an option, instead of sharing them with other Google accounts."
     },
     {
