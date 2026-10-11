@@ -114,10 +114,29 @@ def _build_pdf(**kwargs) -> bytes:
     )
 
 
+def _book_margins_pt() -> tuple[float, float, float, float]:
+    return (
+        float(_LAYOUT["margin_left_in"]) * 72.0,
+        float(_LAYOUT["margin_right_in"]) * 72.0,
+        float(_LAYOUT["margin_top_in"]) * 72.0,
+        float(_LAYOUT["margin_bottom_in"]) * 72.0,
+    )
+
+
+def _assert_insert_uses_book_margins(page, page_width: float, page_height: float) -> None:
+    margin_left, margin_right, margin_top, margin_bottom = _book_margins_pt()
+    image = page.images[0]
+    assert image.x == margin_left
+    assert image.y == margin_bottom
+    assert image.width == page_width - margin_left - margin_right
+    assert image.height == page_height - margin_top - margin_bottom
+
+
 def test_insert_page_builder_returns_one_page_for_jpeg() -> None:
     data_url, width, height = _tiny_jpeg_data_url()
     page_width = float(_LAYOUT["trim_width_in"]) * 72.0
     page_height = float(_LAYOUT["trim_height_in"]) * 72.0
+    margin_left, margin_right, margin_top, margin_bottom = _book_margins_pt()
     pages = _build_insert_pages(
         include_insert_file=True,
         insert_file_data=data_url,
@@ -126,14 +145,20 @@ def test_insert_page_builder_returns_one_page_for_jpeg() -> None:
         insert_file_height=height,
         page_width=page_width,
         page_height=page_height,
+        margin_left=margin_left,
+        margin_right=margin_right,
+        margin_top=margin_top,
+        margin_bottom=margin_bottom,
     )
     assert len(pages) == 1
     assert pages[0].images
+    _assert_insert_uses_book_margins(pages[0], page_width, page_height)
 
 
 def test_insert_page_builder_returns_one_page_for_pdf() -> None:
     page_width = float(_LAYOUT["trim_width_in"]) * 72.0
     page_height = float(_LAYOUT["trim_height_in"]) * 72.0
+    margin_left, margin_right, margin_top, margin_bottom = _book_margins_pt()
     pages = _build_insert_pages(
         include_insert_file=True,
         insert_file_data=_sample_pdf_base64(),
@@ -142,6 +167,10 @@ def test_insert_page_builder_returns_one_page_for_pdf() -> None:
         insert_file_height=0,
         page_width=page_width,
         page_height=page_height,
+        margin_left=margin_left,
+        margin_right=margin_right,
+        margin_top=margin_top,
+        margin_bottom=margin_bottom,
     )
     assert len(pages) == 1
     assert pages[0].images
@@ -149,6 +178,7 @@ def test_insert_page_builder_returns_one_page_for_pdf() -> None:
     assert image.filter_name == "FlateDecode"
     assert image.pixel_width >= 2000
     assert image.pixel_height >= 3000
+    _assert_insert_uses_book_margins(pages[0], page_width, page_height)
 
 
 def test_insert_file_adds_page_and_shifts_content_footer() -> None:

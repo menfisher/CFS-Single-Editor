@@ -7,6 +7,8 @@ from app.services.meeting_v2_service import DEFAULT_BOOK_PRESET, ensure_default_
 FONT_FAMILY_OPTIONS = [
     "Arial",
     "Helvetica",
+    "Verdana",
+    "Tahoma",
     "Times New Roman",
     "Georgia",
     "Courier New",

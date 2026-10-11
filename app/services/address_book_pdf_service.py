@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import quote
 
 from app.services.address_format import address_display_lines
+from app.services.pdf_font_service import add_embedded_pdf_font_set, pdf_text_width
 from app.services.preset_service import FONT_FAMILY_OPTIONS
 
 
@@ -406,17 +407,21 @@ class _PdfWriter:
             objects.append(raw.encode("latin-1") if isinstance(raw, str) else raw)
             return len(objects)
 
-        font_regular_name, font_bold_name = _pdf_base_font_names(self.font_family)
-        font_italic_name = _pdf_italic_font_name(self.font_family)
-        font_regular = add_object(
-            f"<< /Type /Font /Subtype /Type1 /BaseFont /{font_regular_name} /Encoding /WinAnsiEncoding >>"
-        )
-        font_bold = add_object(
-            f"<< /Type /Font /Subtype /Type1 /BaseFont /{font_bold_name} /Encoding /WinAnsiEncoding >>"
-        )
-        font_italic = add_object(
-            f"<< /Type /Font /Subtype /Type1 /BaseFont /{font_italic_name} /Encoding /WinAnsiEncoding >>"
-        )
+        embedded_fonts = add_embedded_pdf_font_set(add_object, self.font_family)
+        if embedded_fonts:
+            font_regular, font_bold, font_italic = embedded_fonts
+        else:
+            font_regular_name, font_bold_name = _pdf_base_font_names(self.font_family)
+            font_italic_name = _pdf_italic_font_name(self.font_family)
+            font_regular = add_object(
+                f"<< /Type /Font /Subtype /Type1 /BaseFont /{font_regular_name} /Encoding /WinAnsiEncoding >>"
+            )
+            font_bold = add_object(
+                f"<< /Type /Font /Subtype /Type1 /BaseFont /{font_bold_name} /Encoding /WinAnsiEncoding >>"
+            )
+            font_italic = add_object(
+                f"<< /Type /Font /Subtype /Type1 /BaseFont /{font_italic_name} /Encoding /WinAnsiEncoding >>"
+            )
         page_refs: list[int] = []
         pending_pages: list[tuple[_PdfPage, int, dict[str, int]]] = []
         content_refs: set[int] = set()
@@ -535,6 +540,9 @@ class _PdfWriter:
 
 def _text_width(text: str, size: float, font_family: str = "Arial", *, bold: bool = False) -> float:
     normalized = _normalize_pdf_text(text)
+    measured = pdf_text_width(normalized, size, font_family, bold=bold)
+    if measured is not None:
+        return measured
     group = _pdf_font_group(font_family)
     if group == "courier":
         return len(normalized) * _PDF_COURIER_WIDTH * size / 1000.0
@@ -947,17 +955,25 @@ def _full_bleed_image_page(
     page_height: float,
     *,
     filter_name: str = "DCTDecode",
+    margin_left: float = 0.0,
+    margin_right: float = 0.0,
+    margin_top: float = 0.0,
+    margin_bottom: float = 0.0,
 ) -> _PdfPage:
+    image_x = max(0.0, float(margin_left))
+    image_y = max(0.0, float(margin_bottom))
+    image_width = max(1.0, float(page_width) - image_x - max(0.0, float(margin_right)))
+    image_height = max(1.0, float(page_height) - max(0.0, float(margin_top)) - image_y)
     page = _PdfPage(page_width, page_height)
     page.images.append(
         _PdfImage(
             image_data,
             pixel_width,
             pixel_height,
-            0,
-            0,
-            page_width,
-            page_height,
+            image_x,
+            image_y,
+            image_width,
+            image_height,
             filter_name=filter_name,
         )
     )
@@ -1122,6 +1138,10 @@ def _build_insert_pages(
     page_width: float,
     page_height: float,
     insert_file_crop: object = None,
+    margin_left: float = 0.0,
+    margin_right: float = 0.0,
+    margin_top: float = 0.0,
+    margin_bottom: float = 0.0,
 ) -> list[_PdfPage]:
     if not include_insert_file:
         return []
@@ -1135,7 +1155,19 @@ def _build_insert_pages(
             if not fallback:
                 return []
             image_data, pixel_width, pixel_height = fallback
-            return [_full_bleed_image_page(image_data, pixel_width, pixel_height, page_width, page_height)]
+            return [
+                _full_bleed_image_page(
+                    image_data,
+                    pixel_width,
+                    pixel_height,
+                    page_width,
+                    page_height,
+                    margin_left=margin_left,
+                    margin_right=margin_right,
+                    margin_top=margin_top,
+                    margin_bottom=margin_bottom,
+                )
+            ]
         image_data, pixel_width, pixel_height, filter_name = rendered
         return [
             _full_bleed_image_page(
@@ -1145,13 +1177,29 @@ def _build_insert_pages(
                 page_width,
                 page_height,
                 filter_name=filter_name,
+                margin_left=margin_left,
+                margin_right=margin_right,
+                margin_top=margin_top,
+                margin_bottom=margin_bottom,
             )
         ]
     cover_image = _cover_image_from_data_url(insert_file_data, insert_file_width, insert_file_height)
     if not cover_image:
         return []
     image_data, pixel_width, pixel_height = cover_image
-    return [_full_bleed_image_page(image_data, pixel_width, pixel_height, page_width, page_height)]
+    return [
+        _full_bleed_image_page(
+            image_data,
+            pixel_width,
+            pixel_height,
+            page_width,
+            page_height,
+            margin_left=margin_left,
+            margin_right=margin_right,
+            margin_top=margin_top,
+            margin_bottom=margin_bottom,
+        )
+    ]
 
 
 def _pdf_color(value: object) -> tuple[float, float, float]:
@@ -2326,6 +2374,10 @@ def build_address_book_pdf(
         page_width=page_width,
         page_height=page_height,
         insert_file_crop=insert_file_crop,
+        margin_left=margin_left,
+        margin_right=margin_right,
+        margin_top=margin_top,
+        margin_bottom=margin_bottom,
     )
     insert_page_count = len(insert_pages)
     compact_toc_index = bool(_clean(paper_book_binding))
