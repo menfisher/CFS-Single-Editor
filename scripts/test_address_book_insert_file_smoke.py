@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import base64
-import re
 import sys
 from pathlib import Path
 
@@ -67,22 +66,20 @@ def _pdf_page_count(pdf: bytes) -> int:
         document.close()
 
 
+def _normalize_pdf_text(value: str) -> str:
+    return value.replace("\xa0", " ").replace("\u00ad", "-")
+
+
 def _pdf_page_texts(pdf: bytes) -> list[str]:
     document = fitz.open(stream=pdf, filetype="pdf")
     try:
-        return [page.get_text("text") for page in document]
+        return [_normalize_pdf_text(page.get_text("text")) for page in document]
     finally:
         document.close()
 
 
-def _pdf_texts(pdf: bytes) -> list[str]:
-    texts: list[str] = []
-    stream = pdf.decode("latin-1", errors="replace")
-    for part in re.findall(r"stream\n(.*?)\nendstream", stream, re.DOTALL):
-        for block in re.findall(r"BT(.*?)ET", part, re.DOTALL):
-            for match in re.finditer(r"\(([^)]*)\)\s*Tj", block):
-                texts.append(match.group(1).replace("\\(", "(").replace("\\)", ")"))
-    return texts
+def _pdf_texts(pdf: bytes) -> str:
+    return "\n".join(_pdf_page_texts(pdf))
 
 
 def _tiny_jpeg_data_url() -> tuple[str, int, int]:

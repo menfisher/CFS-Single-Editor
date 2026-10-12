@@ -374,7 +374,7 @@
 
 .address-book-pdf-phone-line {
   display: grid;
-  /* phone | gap | reserved 2-letter slot (3ch so "Ma" is not clipped) */
+  /* phone | 2 initials + 1 blank (3ch so husband/wife codes stay aligned). */
   grid-template-columns: 12ch 3ch;
   column-gap: 1ch;
   width: 16ch;
@@ -386,11 +386,6 @@
 .address-book-pdf-phone-code {
   min-width: 0;
   white-space: nowrap;
-}
-
-.address-book-pdf-phone-value,
-.address-book-pdf-phone-code {
-  font-family: Arial, Helvetica, sans-serif;
   font-weight: 500;
 }
 

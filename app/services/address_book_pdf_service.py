@@ -14,7 +14,12 @@ from typing import Any
 from urllib.parse import quote
 
 from app.services.address_format import address_display_lines
-from app.services.pdf_font_service import add_embedded_pdf_font_set, pdf_text_width
+from app.services.pdf_font_service import (
+    add_embedded_pdf_font_set,
+    pdf_font_resource_name,
+    pdf_text_width,
+    resolve_pdf_font_path,
+)
 from app.services.preset_service import FONT_FAMILY_OPTIONS
 
 
@@ -114,6 +119,15 @@ def _pdf_base_font_names(font_family: str) -> tuple[str, str]:
     if group == "times":
         return "Times-Roman", "Times-Bold"
     return "Helvetica", "Helvetica-Bold"
+
+
+def _fitz_builtin_font_names_for(font_family: str) -> dict[str, str]:
+    group = _pdf_font_group(font_family)
+    if group == "times":
+        return {"regular": "tiro", "bold": "tibo", "italic": "titi"}
+    if group == "courier":
+        return {"regular": "cour", "bold": "cobo", "italic": "coit"}
+    return {"regular": "helv", "bold": "hebo", "italic": "heit"}
 
 
 def _pdf_italic_font_name(font_family: str) -> str:
@@ -274,6 +288,49 @@ def _offset_pdf_color(
     return tuple(min(1.0, max(0.0, channel + amount)) for channel in color)
 
 
+def _pdf_line_effect_draws(line: _PdfLine) -> list[tuple[float, float, tuple[float, float, float]]]:
+    effect = _clean(line.effect).lower()
+    if not effect or effect == "none":
+        return [(0.0, 0.0, line.color)]
+
+    step = max(0.45, min(2.2, line.size * 0.055))
+    contrast = _contrast_pdf_color(line.color)
+    dark = (0.0, 0.0, 0.0)
+    light = (1.0, 1.0, 1.0)
+    shadow = tuple(channel * 0.22 for channel in line.color)
+
+    if effect == "outline":
+        return [
+            (-step, 0.0, contrast),
+            (step, 0.0, contrast),
+            (0.0, -step, contrast),
+            (0.0, step, contrast),
+            (-step, -step, contrast),
+            (step, -step, contrast),
+            (-step, step, contrast),
+            (step, step, contrast),
+            (0.0, 0.0, line.color),
+        ]
+    if effect == "shadow":
+        return [(step * 1.5, -step * 1.5, shadow), (0.0, 0.0, line.color)]
+    if effect == "embossed":
+        return [(-step, step, light), (step, -step, dark), (0.0, 0.0, line.color)]
+    if effect == "engraved":
+        return [
+            (-step, step, dark),
+            (step, -step, light),
+            (0.0, 0.0, _offset_pdf_color(line.color, -0.08)),
+        ]
+    if effect == "bevel":
+        return [
+            (-step * 0.8, step * 0.8, light),
+            (step * 0.9, -step * 0.9, dark),
+            (step * 1.6, -step * 1.6, shadow),
+            (0.0, 0.0, line.color),
+        ]
+    return [(0.0, 0.0, line.color)]
+
+
 def _pdf_line_content(line: _PdfLine, font_family: str = "Arial") -> list[str]:
     if line.bold:
         font_ref = "/F2"
@@ -297,47 +354,7 @@ def _pdf_line_content(line: _PdfLine, font_family: str = "Arial") -> list[str]:
             f"({_pdf_escape(line.text)}) Tj ET"
         )
 
-    effect = _clean(line.effect).lower()
-    if not effect or effect == "none":
-        return [draw(0.0, 0.0, line.color)]
-
-    step = max(0.45, min(2.2, line.size * 0.055))
-    contrast = _contrast_pdf_color(line.color)
-    dark = (0.0, 0.0, 0.0)
-    light = (1.0, 1.0, 1.0)
-    shadow = tuple(channel * 0.22 for channel in line.color)
-
-    if effect == "outline":
-        parts = [
-            draw(-step, 0.0, contrast),
-            draw(step, 0.0, contrast),
-            draw(0.0, -step, contrast),
-            draw(0.0, step, contrast),
-            draw(-step, -step, contrast),
-            draw(step, -step, contrast),
-            draw(-step, step, contrast),
-            draw(step, step, contrast),
-        ]
-        parts.append(draw(0.0, 0.0, line.color))
-        return parts
-    if effect == "shadow":
-        return [draw(step * 1.5, -step * 1.5, shadow), draw(0.0, 0.0, line.color)]
-    if effect == "embossed":
-        return [draw(-step, step, light), draw(step, -step, dark), draw(0.0, 0.0, line.color)]
-    if effect == "engraved":
-        return [
-            draw(-step, step, dark),
-            draw(step, -step, light),
-            draw(0.0, 0.0, _offset_pdf_color(line.color, -0.08)),
-        ]
-    if effect == "bevel":
-        return [
-            draw(-step * 0.8, step * 0.8, light),
-            draw(step * 0.9, -step * 0.9, dark),
-            draw(step * 1.6, -step * 1.6, shadow),
-            draw(0.0, 0.0, line.color),
-        ]
-    return [draw(0.0, 0.0, line.color)]
+    return [draw(x_offset, y_offset, color) for x_offset, y_offset, color in _pdf_line_effect_draws(line)]
 
 
 @dataclass
@@ -388,6 +405,43 @@ class _IndexEntry:
     target_y: float = 0.0
 
 
+def _fitz_insert_page_image(page, image: _PdfImage, page_h: float, fitz) -> None:
+    rect = fitz.Rect(
+        image.x,
+        page_h - image.y - image.height,
+        image.x + image.width,
+        page_h - image.y,
+    )
+    rotate = 180 if image.rotate_180 else 0
+    data = bytes(image.data or b"")
+    if not data:
+        return
+
+    def insert_pixmap(rgb: bytes) -> None:
+        pixmap = fitz.Pixmap(
+            fitz.csRGB,
+            max(1, int(image.pixel_width)),
+            max(1, int(image.pixel_height)),
+            rgb,
+            0,
+        )
+        page.insert_image(rect, pixmap=pixmap, rotate=rotate)
+
+    if image.filter_name == "FlateDecode":
+        insert_pixmap(zlib.decompress(data))
+        return
+    if data[:2] == b"\xff\xd8" or data[:8] == b"\x89PNG\r\n\x1a\n":
+        page.insert_image(rect, stream=data, rotate=rotate)
+        return
+    try:
+        page.insert_image(rect, stream=data, rotate=rotate)
+    except Exception:
+        if image.filter_name == "FlateDecode" or len(data) == int(image.pixel_width) * int(image.pixel_height) * 3:
+            insert_pixmap(data)
+        else:
+            raise
+
+
 class _PdfWriter:
     def __init__(self, width: float, height: float, *, font_family: str = "Arial") -> None:
         self.width = width
@@ -401,6 +455,115 @@ class _PdfWriter:
         return page
 
     def bytes(self) -> bytes:
+        rendered = self._fitz_bytes()
+        if rendered:
+            return rendered
+        return self._legacy_bytes()
+
+    def _font_file_paths(self) -> dict[str, str]:
+        regular = resolve_pdf_font_path(self.font_family, "regular")
+        if not regular:
+            return {}
+        return {
+            "regular": regular,
+            "bold": resolve_pdf_font_path(self.font_family, "bold") or regular,
+            "italic": resolve_pdf_font_path(self.font_family, "italic") or regular,
+        }
+
+    def _fitz_builtin_font_names(self) -> dict[str, str]:
+        return _fitz_builtin_font_names_for(self.font_family)
+
+    def _fitz_bytes(self) -> bytes | None:
+        try:
+            from app.services.pymupdf_runtime import ensure_pymupdf
+
+            ensure_pymupdf()
+            import fitz
+        except Exception:
+            return None
+
+        font_files = self._font_file_paths()
+        builtin = self._fitz_builtin_font_names()
+        document = fitz.open()
+        pending_links: list[tuple[int, dict]] = []
+        try:
+            for page_data in self.pages:
+                page = document.new_page(width=page_data.width, height=page_data.height)
+                page_h = page_data.height
+                font_names = dict(builtin)
+                if font_files:
+                    for style, path in font_files.items():
+                        fontname = pdf_font_resource_name(self.font_family, style)
+                        page.insert_font(
+                            fontname=fontname,
+                            fontfile=path,
+                            set_simple=True,
+                        )
+                        font_names[style] = fontname
+                for image in page_data.images:
+                    _fitz_insert_page_image(page, image, page_h, fitz)
+                for rule in page_data.rules:
+                    page.draw_line(
+                        fitz.Point(rule.x1, page_h - rule.y1),
+                        fitz.Point(rule.x2, page_h - rule.y2),
+                        width=rule.width,
+                        color=(0, 0, 0),
+                    )
+                for line in page_data.lines:
+                    if not str(line.text or ""):
+                        continue
+                    style = "bold" if line.bold else "italic" if line.italic else "regular"
+                    fontname = font_names[style]
+                    line_width = line.width or _text_width(line.text, line.size, self.font_family)
+                    for x_offset, y_offset, color in _pdf_line_effect_draws(line):
+                        if line.rotate_180:
+                            point = fitz.Point(
+                                line.x + line_width + x_offset,
+                                page_h - (line.y + line.size + y_offset),
+                            )
+                            rotate = 180
+                        else:
+                            point = fitz.Point(line.x + x_offset, page_h - (line.y + y_offset))
+                            rotate = 0
+                        page.insert_text(
+                            point,
+                            line.text,
+                            fontsize=line.size,
+                            fontname=fontname,
+                            color=color,
+                            rotate=rotate,
+                        )
+                    if not line.uri and line.link_page_index is None:
+                        continue
+                    rect = fitz.Rect(
+                        line.x,
+                        page_h - (line.y + line.size + 1),
+                        line.x + line_width,
+                        page_h - (line.y - 1),
+                    )
+                    link = {
+                        "from": rect,
+                    }
+                    if line.link_page_index is not None:
+                        target_y = page_h - line.link_page_y if line.link_page_y is not None else 0
+                        link.update(
+                            {
+                                "kind": fitz.LINK_GOTO,
+                                "page": max(0, min(len(self.pages) - 1, line.link_page_index)),
+                                "to": fitz.Point(0, target_y),
+                            }
+                        )
+                    else:
+                        link.update({"kind": fitz.LINK_URI, "uri": line.uri})
+                    pending_links.append((len(document) - 1, link))
+            for page_index, link in pending_links:
+                document[page_index].insert_link(link)
+            _fitz_sync_embedded_font_names(document)
+            return document.tobytes(deflate=True, garbage=4, clean=True)
+        finally:
+            document.close()
+
+    def _legacy_bytes(self) -> bytes:
         objects: list[bytes] = []
 
         def add_object(raw: str | bytes) -> int:
@@ -536,6 +699,53 @@ class _PdfWriter:
             f"trailer\n<< /Size {len(objects) + 1} /Root {catalog_ref} 0 R >>\nstartxref\n{xref_start}\n%%EOF\n".encode("latin-1")
         )
         return b"".join(chunks)
+
+
+def _fitz_sync_embedded_font_names(document) -> None:
+    """Point each font descriptor at the PostScript BaseFont name.
+
+    MuPDF stores the TrueType full name (`Verdana Bold`) in /FontName while
+    /BaseFont is the PostScript name (`Verdana-Bold`). Preview and Chrome then
+    ignore the embedded file and substitute Arial.
+    """
+    for xref in range(1, document.xref_length()):
+        try:
+            font_type = document.xref_get_key(xref, "Type")
+            subtype = document.xref_get_key(xref, "Subtype")
+        except Exception:
+            continue
+        if font_type != ("name", "/Font") or subtype[1] not in {"/TrueType", "/Type1"}:
+            continue
+        try:
+            base = document.xref_get_key(xref, "BaseFont")
+            descriptor = document.xref_get_key(xref, "FontDescriptor")
+        except Exception:
+            continue
+        if base[0] != "name" or descriptor[0] != "xref":
+            continue
+        try:
+            descriptor_xref = int(str(descriptor[1]).split()[0])
+            document.xref_set_key(descriptor_xref, "FontName", base[1])
+        except Exception:
+            continue
+
+
+def _contact_text_columns(
+    margin_left: float,
+    page_width: float,
+    margin_right: float,
+    font_size: float,
+    tw,
+) -> tuple[float, float, float, float, float]:
+    """16ch phone stack: number, then 2 initials plus a blank before the name."""
+    space_width = tw(" ", font_size)
+    ch_width = tw("0", font_size)
+    phone_x = margin_left
+    phone_code_x = phone_x + tw("000-000-0000", font_size) + space_width
+    main_text_x = phone_x + (ch_width * 16) + ch_width
+    continuation_x = main_text_x + ch_width
+    name_max_width = max(24.0, page_width - margin_right - continuation_x)
+    return phone_x, phone_code_x, main_text_x, continuation_x, name_max_width
 
 
 def _text_width(text: str, size: float, font_family: str = "Arial", *, bold: bool = False) -> float:
@@ -2105,12 +2315,10 @@ def build_address_book_pdf(
         phones = list(contact.get("phones") or [])
         addresses = list(contact.get("address_entries") or contact.get("addresses") or [])
         name = _clean(contact.get("name"))
-        phone_x = margin_left
+        phone_x, phone_code_x, main_text_x, continuation_x, name_max_width = _contact_text_columns(
+            margin_left, page_width, margin_right, font_size, tw
+        )
         space_width = tw(" ", font_size)
-        phone_code_x = phone_x + tw("000-000-0000", font_size) + space_width
-        main_text_x = phone_code_x + tw("MM", font_size) + space_width
-        continuation_x = main_text_x + space_width
-        name_max_width = max(24, page_width - margin_right - continuation_x)
         # Addresses never use the phone column, even when right-aligned.
         address_max_width = max(24, page_width - margin_right - (main_text_x + space_width))
         address_line_count = 0
@@ -2190,12 +2398,10 @@ def build_address_book_pdf(
                 phones = list(contact.get("phones") or [])
                 addresses = list(contact.get("address_entries") or contact.get("addresses") or [])
                 name = _clean(contact.get("name"))
-                phone_x = margin_left
+                phone_x, phone_code_x, main_text_x, continuation_x, name_max_width = _contact_text_columns(
+                    margin_left, page_width, margin_right, font_size, tw
+                )
                 space_width = tw(" ", font_size)
-                phone_code_x = phone_x + tw("000-000-0000", font_size) + space_width
-                main_text_x = phone_code_x + tw("MM", font_size) + space_width
-                continuation_x = main_text_x + space_width
-                name_max_width = max(24, page_width - margin_right - continuation_x)
                 # Addresses never use the phone column, even when right-aligned.
                 address_max_width = max(24, page_width - margin_right - (main_text_x + space_width))
                 address_lines: list[tuple[str, str, bool]] = []

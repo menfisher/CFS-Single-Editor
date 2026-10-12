@@ -314,13 +314,30 @@ function addressBookPdfFontGroup(fontFamily = "Arial") {
 }
 
 function measureAddressBookPdfTextWidth(text, fontSizePx, fontFamily = "Arial") {
+  const value = String(text || "");
+  if (!value) return 0;
   const group = addressBookPdfFontGroup(fontFamily);
+  if (typeof document !== "undefined") {
+    try {
+      const canvas = measureAddressBookPdfTextWidth._canvas
+        || (measureAddressBookPdfTextWidth._canvas = document.createElement("canvas"));
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        const fallback = group === "courier" ? "monospace" : group === "times" ? "serif" : "sans-serif";
+        ctx.font = `${fontSizePx}px "${fontFamily}", ${fallback}`;
+        const width = ctx.measureText(value).width;
+        if (Number.isFinite(width) && width > 0) return width;
+      }
+    } catch (_error) {
+      // Use the built-in width tables when canvas fonts are unavailable.
+    }
+  }
   if (group === "courier") {
-    return String(text || "").length * 600 * fontSizePx / 1000;
+    return value.length * 600 * fontSizePx / 1000;
   }
   const widths = ADDRESS_BOOK_PDF_FONT_WIDTHS[group] || ADDRESS_BOOK_PDF_FONT_WIDTHS.helvetica;
   const fallback = group === "times" ? 444 : 556;
-  return [...String(text || "")].reduce(
+  return [...value].reduce(
     (sum, char) => sum + (widths[char] ?? fallback),
     0,
   ) * fontSizePx / 1000;
@@ -342,11 +359,8 @@ function addressBookPdfPreviewLayoutMetrics() {
 }
 
 function addressBookPdfContactNameMaxWidthPx(printableWidthPx, fontSizePx, fontFamily = "Arial") {
-  const spaceWidth = measureAddressBookPdfTextWidth(" ", fontSizePx, fontFamily);
-  const phoneWidth = measureAddressBookPdfTextWidth("000-000-0000", fontSizePx, fontFamily);
-  const codeWidth = measureAddressBookPdfTextWidth("MM", fontSizePx, fontFamily);
-  const phoneColumnWidth = phoneWidth + (spaceWidth * 1.5) + codeWidth;
-  return Math.max(120, printableWidthPx - phoneColumnWidth);
+  const chWidth = measureAddressBookPdfTextWidth("0", fontSizePx, fontFamily);
+  return Math.max(120, printableWidthPx - (chWidth * 17));
 }
 
 function wrapAddressBookPdfNameWords(text, measureWidth, maxWidth) {
