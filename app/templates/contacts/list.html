@@ -20,6 +20,7 @@
   ] %}
   <div class="contacts-page">
     {% set google_account_email = google_sync.account.email if google_sync is defined else "" %}
+    {% set google_sync_enabled = google_sync.state.sync_enabled if google_sync is defined else false %}
     {% set pending_upload_count = google_sync.state.pending_upload_count if google_sync is defined else 0 %}
     {% set settings_drive_pending = google_sync.state.settings_needs_drive_export if google_sync is defined else false %}
     {% set contact_records_drive_pending = (google_sync.state.contact_records_needs_drive_export or google_sync.state.contacts_manifest_needs_drive_export) if google_sync is defined else false %}
@@ -155,7 +156,7 @@
           Drive changes are waiting to upload. Click Upload to send them now.
         {% endif %}
       </section>
-    {% elif not google_account_email %}
+    {% elif google_sync_enabled and not google_account_email %}
       <section class="panel google-sync-banner google-sync-banner-info">
         GoogleConnect is not configured yet. Use <a href="/presets/google-connect">GoogleConnect</a> before importing or uploading contacts.
       </section>

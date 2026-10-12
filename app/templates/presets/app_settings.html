@@ -236,6 +236,7 @@
             </div>
           </section>
 
+          {% if not single_editor_only %}
           <section class="subcard app-settings-shared-group-card">
             <div class="subcard-title">Shared Contacts Group</div>
             <div class="app-settings-shared-group-field">
@@ -252,6 +253,7 @@
               <p class="muted app-settings-field-help">Used in Google group membership for every shared field/meeting contact, alongside <code>{Field} - {Meeting} (Shared)</code>. Changing this name renames that one Google label in this account and in each account currently sharing it. Contacts are not re-uploaded.</p>
             </div>
           </section>
+          {% endif %}
           <div class="editor-actions-links app-settings-actions">
             <button type="submit" class="contact-card-button contact-card-button-edit">Save Settings</button>
           </div>
