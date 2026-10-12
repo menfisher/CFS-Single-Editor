@@ -2,8 +2,13 @@
   "format": "contactsfreeshare.published_revisions.v1",
   "revisions": [
     {
-      "version": "1.240",
+      "version": "1.241",
+      "date_display": "10/12/2026",
+      "description": "Address book PDFs keep the chosen font, including Verdana. Phone letters still reserve two initials plus a blank."
+    },
+    {
       "date_display": "10/11/2026",
+      "version": "1.240",
       "description": "Print the chosen address book font in the PDF and paper book. The insert before the table of contents uses the book margins. The error log keeps only recent messages."
     },
     {
