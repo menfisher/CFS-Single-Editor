@@ -2,8 +2,13 @@
   "format": "contactsfreeshare.published_revisions.v1",
   "revisions": [
     {
-      "version": "1.241.1",
+      "version": "1.241.2",
       "date_display": "10/12/2026",
+      "description": "Tighten the phone-letter gap in Verdana. Title and TOC font sizes can be set on the Address Book page, and the book title is centered."
+    },
+    {
+      "date_display": "10/12/2026",
+      "version": "1.241.1",
       "description": "Google Sign In works in the published Single Editor app. Local-only mode no longer asks for Google Connect, and the Share-app group name is off Settings."
     },
     {
