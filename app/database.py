@@ -266,6 +266,20 @@ def _ensure_book_layout_preset_columns(conn: sqlite3.Connection) -> None:
             ADD COLUMN shared_contacts_group_name TEXT NOT NULL DEFAULT 'TriState Separates (Shared)'
             """
         )
+    if "title_font_size_pt" not in columns:
+        conn.execute(
+            """
+            ALTER TABLE book_layout_presets
+            ADD COLUMN title_font_size_pt REAL NOT NULL DEFAULT 12.0
+            """
+        )
+    if "toc_font_size_pt" not in columns:
+        conn.execute(
+            """
+            ALTER TABLE book_layout_presets
+            ADD COLUMN toc_font_size_pt REAL NOT NULL DEFAULT 10.0
+            """
+        )
 
 
 def _ensure_google_sync_columns(conn: sqlite3.Connection) -> None:

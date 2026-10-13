@@ -360,7 +360,7 @@ function addressBookPdfPreviewLayoutMetrics() {
 
 function addressBookPdfContactNameMaxWidthPx(printableWidthPx, fontSizePx, fontFamily = "Arial") {
   const chWidth = measureAddressBookPdfTextWidth("0", fontSizePx, fontFamily);
-  return Math.max(120, printableWidthPx - (chWidth * 17));
+  return Math.max(120, printableWidthPx - (chWidth * 16));
 }
 
 function wrapAddressBookPdfNameWords(text, measureWidth, maxWidth) {

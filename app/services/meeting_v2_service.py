@@ -56,6 +56,8 @@ DEFAULT_BOOK_PRESET = {
     "margin_bottom_in": 0.14,
     "font_family": "Arial",
     "base_font_size_pt": 7.0,
+    "title_font_size_pt": 12.0,
+    "toc_font_size_pt": 10.0,
     "line_height": 1.2,
     "meeting_table_column_count": 28,
     "meeting_table_column_gap_px": 6,

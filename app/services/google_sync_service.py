@@ -126,6 +126,8 @@ BOOK_LAYOUT_SETTING_COLUMNS = [
     "margin_bottom_in",
     "font_family",
     "base_font_size_pt",
+    "title_font_size_pt",
+    "toc_font_size_pt",
     "line_height",
     "meeting_table_column_count",
     "meeting_table_column_gap_px",

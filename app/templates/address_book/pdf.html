@@ -117,6 +117,14 @@
             Line spacing
             <input id="address-book-pdf-line-height" name="line_height" type="number" min="0.5" step="0.01" value="{{ selected_preset.line_height }}">
           </label>
+          <label class="form-label" for="address-book-pdf-title-font-size">
+            Title
+            <input id="address-book-pdf-title-font-size" name="title_font_size_pt" type="number" min="1" step="0.1" value="{{ selected_preset.title_font_size_pt }}">
+          </label>
+          <label class="form-label" for="address-book-pdf-toc-font-size">
+            TOC
+            <input id="address-book-pdf-toc-font-size" name="toc_font_size_pt" type="number" min="1" step="0.1" value="{{ selected_preset.toc_font_size_pt }}">
+          </label>
         </div>
       </section>
 

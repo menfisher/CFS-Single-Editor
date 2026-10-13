@@ -6,6 +6,9 @@ from app.services.address_book_pdf_service import (
     _PdfImage,
     _PdfLine,
     _PdfWriter,
+    _TocEntry,
+    _build_toc_pages,
+    _center_text_x,
     _contact_text_columns,
     _text_width,
     build_address_book_pdf,
@@ -57,10 +60,57 @@ class PdfEmbeddedFontTests(unittest.TestCase):
         _phone_x, _code_x, _main_x, _cont_x, name_max = _contact_text_columns(
             0.14 * 72, 3.5 * 72, 0.14 * 72, 7, tw
         )
-        full = "GRAHAM, Mark & Stephanie; Ruth, Harrison"
+        full = "GRAHAM, Mark & Stephanie; Ruth, Harrison, Extra"
         head = "GRAHAM, Mark & Stephanie;"
         self.assertGreater(tw(full, 7), name_max)
         self.assertLessEqual(tw(head, 7), name_max)
+
+    def test_phone_letter_slot_is_two_characters_plus_one_space(self) -> None:
+        if not resolve_pdf_font_path("Verdana", "regular"):
+            self.skipTest("Verdana is not installed on this computer")
+
+        def tw(text: str, size: float) -> float:
+            return _text_width(text, size, "Verdana")
+
+        phone_x, phone_code_x, main_text_x, _cont_x, _name_max = _contact_text_columns(
+            0.14 * 72, 3.5 * 72, 0.14 * 72, 7, tw
+        )
+        ch = tw("0", 7)
+        self.assertAlmostEqual((phone_code_x - phone_x) / ch, 13.0, places=5)
+        self.assertAlmostEqual((main_text_x - phone_code_x) / ch, 3.0, places=5)
+        after_two_letter_code = phone_code_x + (ch * 2)
+        self.assertAlmostEqual((main_text_x - after_two_letter_code) / ch, 1.0, places=5)
+
+    def test_toc_uses_chosen_title_and_entry_font_sizes(self) -> None:
+        pages = _build_toc_pages(
+            entries=[_TocEntry(field_name="Field A", meeting_heading="APEX", page=1)],
+            book_title="NC Address Book",
+            page_width=252,
+            page_height=360,
+            margin_left=10,
+            margin_right=10,
+            margin_top=10,
+            margin_bottom=10,
+            base_font_size=7,
+            page_offset=0,
+            compact=False,
+            font_family="Arial",
+            title_font_size=8,
+            toc_font_size=7,
+        )
+        self.assertTrue(pages)
+        sizes = {line.size for line in pages[0].lines}
+        self.assertIn(8.0, sizes)
+        self.assertIn(7.0, sizes)
+        title = next(line for line in pages[0].lines if line.text.startswith("NC Address Book"))
+        entry = next(line for line in pages[0].lines if line.text == "APEX")
+        self.assertEqual(title.size, 8.0)
+        self.assertEqual(entry.size, 7.0)
+        self.assertAlmostEqual(
+            title.x,
+            _center_text_x(title.text, title.size, 252, 10, 10, "Arial", bold=True),
+            places=4,
+        )
 
     def test_address_book_pdf_keeps_verdana_instead_of_arial(self) -> None:
         if not resolve_pdf_font_path("Verdana", "regular"):

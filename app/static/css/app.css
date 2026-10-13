@@ -355,9 +355,9 @@
 
 .address-book-pdf-contact-line {
   display: grid;
-  /* Fixed phone stack so every name/address starts on the same vertical line. */
+  /* 16ch stack already includes 2-letter code + 1 space; name starts immediately after. */
   grid-template-columns: 16ch minmax(0, 1fr);
-  column-gap: 1ch;
+  column-gap: 0;
   align-items: start;
   min-width: 0;
 }
@@ -7322,10 +7322,10 @@ button.site-nav-dropdown-item:hover {
 
 .field-list-contact-row {
   display: grid;
-  /* Fixed phone stack so every bold name starts on the same vertical line. */
+  /* 16ch stack already includes 2-letter code + 1 space; name starts immediately after. */
   grid-template-columns: 16ch minmax(0, 1fr);
   align-items: start;
-  column-gap: 1ch;
+  column-gap: 0;
   width: var(--field-list-column-width-in, 3.55in);
   min-width: var(--field-list-column-width-in, 3.55in);
 }

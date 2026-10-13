@@ -514,7 +514,9 @@ class _PdfWriter:
                         continue
                     style = "bold" if line.bold else "italic" if line.italic else "regular"
                     fontname = font_names[style]
-                    line_width = line.width or _text_width(line.text, line.size, self.font_family)
+                    line_width = line.width or _text_width(
+                        line.text, line.size, self.font_family, bold=line.bold
+                    )
                     for x_offset, y_offset, color in _pdf_line_effect_draws(line):
                         if line.rotate_180:
                             point = fitz.Point(
@@ -737,12 +739,11 @@ def _contact_text_columns(
     font_size: float,
     tw,
 ) -> tuple[float, float, float, float, float]:
-    """16ch phone stack: number, then 2 initials plus a blank before the name."""
-    space_width = tw(" ", font_size)
+    """16ch phone stack: 12ch number, 1ch gap, 2-letter code plus 1 space, then the name."""
     ch_width = tw("0", font_size)
     phone_x = margin_left
-    phone_code_x = phone_x + tw("000-000-0000", font_size) + space_width
-    main_text_x = phone_x + (ch_width * 16) + ch_width
+    phone_code_x = phone_x + (ch_width * 12) + ch_width
+    main_text_x = phone_x + (ch_width * 16)
     continuation_x = main_text_x + ch_width
     name_max_width = max(24.0, page_width - margin_right - continuation_x)
     return phone_x, phone_code_x, main_text_x, continuation_x, name_max_width
@@ -1111,14 +1112,29 @@ def _meeting_row_chunks(rows: list[dict]) -> list[list[dict]]:
     return chunks
 
 
-def _fit_text(text: str, size: float, max_width: float, font_family: str = "Arial") -> str:
+def _fit_text(text: str, size: float, max_width: float, font_family: str = "Arial", *, bold: bool = False) -> str:
     value = _clean(text)
-    if _text_width(value, size, font_family) <= max_width:
+    if _text_width(value, size, font_family, bold=bold) <= max_width:
         return value
     suffix = "..."
-    while value and _text_width(value + suffix, size, font_family) > max_width:
+    while value and _text_width(value + suffix, size, font_family, bold=bold) > max_width:
         value = value[:-1].rstrip()
     return (value + suffix) if value else suffix
+
+
+def _center_text_x(
+    text: str,
+    size: float,
+    page_width: float,
+    margin_left: float,
+    margin_right: float,
+    font_family: str,
+    *,
+    bold: bool = False,
+) -> float:
+    width = _text_width(text, size, font_family, bold=bold)
+    printable = max(0.0, page_width - margin_left - margin_right)
+    return margin_left + max(0.0, (printable - width) / 2)
 
 
 def _index_contact_name(name: object) -> str:
@@ -1436,6 +1452,27 @@ def _page_footer_y(margin_bottom: float) -> float:
     return min(half + _PAGE_FOOTER_LIFT_PT, max(half, float(margin_bottom) - 1.0))
 
 
+def _heading_font_sizes(
+    base_font_size: float,
+    compact: bool,
+    title_font_size: float | None = None,
+    toc_font_size: float | None = None,
+) -> tuple[float, float]:
+    try:
+        title_size = float(title_font_size) if title_font_size not in (None, "") else 0.0
+    except (TypeError, ValueError):
+        title_size = 0.0
+    try:
+        item_size = float(toc_font_size) if toc_font_size not in (None, "") else 0.0
+    except (TypeError, ValueError):
+        item_size = 0.0
+    if title_size <= 0:
+        title_size = base_font_size if compact else max(base_font_size + 4.0, 12.0)
+    if item_size <= 0:
+        item_size = base_font_size if compact else max(base_font_size + 3.0, 10.0)
+    return max(1.0, title_size), max(1.0, item_size)
+
+
 def _build_toc_pages(
     *,
     entries: list[_TocEntry],
@@ -1451,6 +1488,8 @@ def _build_toc_pages(
     link_page_offset: int | None = None,
     compact: bool = False,
     font_family: str = "Arial",
+    title_font_size: float | None = None,
+    toc_font_size: float | None = None,
 ) -> list[_PdfPage]:
     if not entries:
         return []
@@ -1463,17 +1502,19 @@ def _build_toc_pages(
         return _fit_text(text, size, max_width, font_family)
 
     toc_pages: list[_PdfPage] = []
-    if compact:
-        title_size = base_font_size
-        field_size = base_font_size
-        item_size = base_font_size
-    else:
-        title_size = max(base_font_size + 4.0, 12.0)
-        field_size = max(base_font_size + 3.0, 10.0)
-        item_size = max(base_font_size + 3.0, 10.0)
+    title_size, item_size = _heading_font_sizes(
+        base_font_size, compact, title_font_size, toc_font_size
+    )
+    field_size = item_size
     line_step = item_size * 1.15
     content_width = page_width - margin_left - margin_right
-    title_text = fit(f"{_clean(book_title) or 'Address Book'} - {_short_date()}", title_size, content_width)
+    title_text = _fit_text(
+        f"{_clean(book_title) or 'Address Book'} - {_short_date()}",
+        title_size,
+        content_width,
+        font_family,
+        bold=True,
+    )
     indent = item_size * 1.2
     page_number_width = max(tw("888", item_size), item_size * 2.1)
     page_number_x = page_width - margin_right - page_number_width
@@ -1487,7 +1528,9 @@ def _build_toc_pages(
         y = page_height - margin_top
         if len(toc_pages) == 1:
             y -= line_step * 0.85
-            title_x = max(margin_left, (page_width - tw(title_text, title_size)) / 2)
+            title_x = _center_text_x(
+                title_text, title_size, page_width, margin_left, margin_right, font_family, bold=True
+            )
             page.lines.append(_PdfLine(title_text, title_x, y, title_size, bold=True))
             y -= line_step * 1.7
         else:
@@ -1499,7 +1542,7 @@ def _build_toc_pages(
         page.lines.append(
             _PdfLine(
                 text,
-                x=max(margin_left, (page_width - tw(text, item_size)) / 2),
+                x=_center_text_x(text, item_size, page_width, margin_left, margin_right, font_family),
                 y=_page_footer_y(margin_bottom),
                 size=item_size,
             )
@@ -1567,7 +1610,10 @@ def _shift_content_footers(pages: list[_PdfPage], page_offset: int, font_family:
             if not match or match.group("label") == "Table of Contents - Page ":
                 continue
             line.text = f"{match.group('label')}{int(match.group('page')) + page_offset}"
-            line.x = max(0.0, (page.width - _text_width(line.text, line.size, font_family)) / 2)
+            line.x = max(
+                0.0,
+                (page.width - _text_width(line.text, line.size, font_family, bold=line.bold)) / 2,
+            )
 
 
 def _build_index_pages(
@@ -1585,6 +1631,8 @@ def _build_index_pages(
     link_page_offset: int = 0,
     compact: bool = False,
     font_family: str = "Arial",
+    title_font_size: float | None = None,
+    toc_font_size: float | None = None,
 ) -> list[_PdfPage]:
     if not entries:
         return []
@@ -1597,14 +1645,10 @@ def _build_index_pages(
 
     sorted_entries = sorted(entries, key=lambda item: (_sort_key(item.name), item.page))
     index_pages: list[_PdfPage] = []
-    if compact:
-        title_size = base_font_size
-        letter_size = base_font_size
-        item_size = base_font_size
-    else:
-        title_size = max(base_font_size + 4.0, 12.0)
-        letter_size = max(base_font_size + 3.0, 10.0)
-        item_size = max(base_font_size + 3.0, 10.0)
+    title_size, item_size = _heading_font_sizes(
+        base_font_size, compact, title_font_size, toc_font_size
+    )
+    letter_size = item_size
     line_step = item_size * 1.15
     content_width = page_width - margin_left - margin_right
     page_number_width = max(tw("888", item_size), item_size * 2.1)
@@ -1622,7 +1666,7 @@ def _build_index_pages(
         y = page_height - margin_top
         y -= line_step * 0.85
         title = "Index"
-        title_x = max(margin_left, (page_width - tw(title, title_size)) / 2)
+        title_x = _center_text_x(title, title_size, page_width, margin_left, margin_right, font_family, bold=True)
         page.lines.append(_PdfLine(title, title_x, y, title_size, bold=True, link_page_index=title_link_page_index))
         y -= line_step * 1.7
         return page
@@ -1632,7 +1676,7 @@ def _build_index_pages(
         page.lines.append(
             _PdfLine(
                 text,
-                x=max(margin_left, (page_width - tw(text, item_size)) / 2),
+                x=_center_text_x(text, item_size, page_width, margin_left, margin_right, font_family),
                 y=_page_footer_y(margin_bottom),
                 size=item_size,
             )
@@ -2110,8 +2154,8 @@ def build_address_book_pdf(
 
     def add_center(text: str, size: float, *, bold: bool = False, link_page_index: int | None = None) -> _PdfLine:
         nonlocal y
-        x = (page_width - tw(text, size)) / 2
-        line = _PdfLine(text=text, x=max(margin_left, x), y=y, size=size, bold=bold, link_page_index=link_page_index)
+        x = _center_text_x(text, size, page_width, margin_left, margin_right, font_family, bold=bold)
+        line = _PdfLine(text=text, x=x, y=y, size=size, bold=bold, link_page_index=link_page_index)
         page.lines.append(line)
         y -= line_step
         return line
@@ -2126,7 +2170,7 @@ def build_address_book_pdf(
         page.lines.append(
             _PdfLine(
                 text=text,
-                x=max(margin_left, (page_width - tw(text, font_size)) / 2),
+                x=_center_text_x(text, font_size, page_width, margin_left, margin_right, font_family, bold=True),
                 y=_page_footer_y(margin_bottom),
                 size=font_size,
                 bold=True,
@@ -2612,6 +2656,8 @@ def build_address_book_pdf(
                 link_page_offset=display_offset + insert_page_count,
                 compact=compact_toc_index,
                 font_family=font_family,
+                title_font_size=layout.get("title_font_size_pt"),
+                toc_font_size=layout.get("toc_font_size_pt"),
             )
             if len(toc_pages) == toc_page_count:
                 break
@@ -2638,6 +2684,8 @@ def build_address_book_pdf(
             link_page_offset=insert_page_count,
             compact=compact_toc_index,
             font_family=font_family,
+            title_font_size=layout.get("title_font_size_pt"),
+            toc_font_size=layout.get("toc_font_size_pt"),
         )
         cover_pages: list[_PdfPage] = []
         if cover_image:

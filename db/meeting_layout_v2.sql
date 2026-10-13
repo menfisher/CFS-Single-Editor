@@ -89,6 +89,8 @@ CREATE TABLE IF NOT EXISTS book_layout_presets (
   margin_bottom_in REAL NOT NULL DEFAULT 0.14,
   font_family TEXT NOT NULL DEFAULT 'Arial',
   base_font_size_pt REAL NOT NULL DEFAULT 7.0,
+  title_font_size_pt REAL NOT NULL DEFAULT 12.0,
+  toc_font_size_pt REAL NOT NULL DEFAULT 10.0,
   line_height REAL NOT NULL DEFAULT 1.2,
   meeting_table_column_count INTEGER NOT NULL DEFAULT 28,
   meeting_table_column_gap_px INTEGER NOT NULL DEFAULT 6,

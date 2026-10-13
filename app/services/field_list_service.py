@@ -1110,10 +1110,9 @@ def _field_list_address_column_width_pt(settings: dict[str, Any]) -> float:
     font_size = float(settings.get("base_font_size_pt") or 10.0)
     font_family = str(settings.get("font_family") or "Arial")
     column_pt = float(settings.get("column_width_in") or 4.0) * 72.0
-    # Match CSS/JS: fixed 16ch phone stack + 1ch gap.
+    # Match CSS/JS: fixed 16ch phone stack (2-letter code + 1 space), then the name.
     phone_pt = _text_width("0" * 16, font_size, font_family)
-    gap_pt = _text_width("0", font_size, font_family)
-    return max(72.0, column_pt - phone_pt - gap_pt)
+    return max(72.0, column_pt - phone_pt)
 
 
 def _field_list_address_display_lines(
@@ -4034,7 +4033,7 @@ main {{
 .print-field-list-contact-row {{
   display: grid;
   grid-template-columns: 16ch minmax(0, 1fr);
-  gap: 1ch;
+  gap: 0;
   break-inside: avoid;
   page-break-inside: avoid;
   min-width: 0;

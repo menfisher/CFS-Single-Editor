@@ -72,6 +72,8 @@ def _default_preset_payload() -> dict:
         "margin_bottom_in": DEFAULT_BOOK_PRESET["margin_bottom_in"],
         "font_family": "Arial",
         "base_font_size_pt": DEFAULT_BOOK_PRESET["base_font_size_pt"],
+        "title_font_size_pt": DEFAULT_BOOK_PRESET["title_font_size_pt"],
+        "toc_font_size_pt": DEFAULT_BOOK_PRESET["toc_font_size_pt"],
         "line_height": DEFAULT_BOOK_PRESET["line_height"],
         "meeting_table_column_count": DEFAULT_BOOK_PRESET["meeting_table_column_count"],
         "meeting_table_column_gap_px": DEFAULT_BOOK_PRESET["meeting_table_column_gap_px"],
@@ -102,6 +104,8 @@ def _normalize_preset_row(row) -> dict:
     preset.setdefault("contacts_secondary_row_color", DEFAULT_BOOK_PRESET["meetingdata_secondary_row_color"])
     preset.setdefault("contacts_highlight_row_color", DEFAULT_BOOK_PRESET["meetingdata_highlight_row_color"])
     preset.setdefault("shared_contacts_group_name", DEFAULT_SHARED_CONTACTS_GROUP_NAME)
+    preset.setdefault("title_font_size_pt", DEFAULT_BOOK_PRESET["title_font_size_pt"])
+    preset.setdefault("toc_font_size_pt", DEFAULT_BOOK_PRESET["toc_font_size_pt"])
     preset["metrics"] = _metrics_for_preset(preset)
     return preset
 
@@ -180,7 +184,26 @@ def save_book_layout_preset(preset_id: int | None, values: dict) -> int:
     margin_right_in = max(0.0, _coerce_float(values.get("margin_right_in"), 0.14))
     margin_top_in = max(0.0, _coerce_float(values.get("margin_top_in"), 0.14))
     margin_bottom_in = max(0.0, _coerce_float(values.get("margin_bottom_in"), 0.14))
+    existing_preset = None
+    if preset_id:
+        existing_preset = fetch_one("SELECT * FROM book_layout_presets WHERE id = ?", (int(preset_id),))
     base_font_size_pt = max(1.0, _coerce_float(values.get("base_font_size_pt"), 7.0))
+    title_font_raw = values.get("title_font_size_pt")
+    if title_font_raw is None or str(title_font_raw).strip() == "":
+        title_font_size_pt = max(
+            1.0,
+            _coerce_float((existing_preset or {}).get("title_font_size_pt"), DEFAULT_BOOK_PRESET["title_font_size_pt"]),
+        )
+    else:
+        title_font_size_pt = max(1.0, _coerce_float(title_font_raw, DEFAULT_BOOK_PRESET["title_font_size_pt"]))
+    toc_font_raw = values.get("toc_font_size_pt")
+    if toc_font_raw is None or str(toc_font_raw).strip() == "":
+        toc_font_size_pt = max(
+            1.0,
+            _coerce_float((existing_preset or {}).get("toc_font_size_pt"), DEFAULT_BOOK_PRESET["toc_font_size_pt"]),
+        )
+    else:
+        toc_font_size_pt = max(1.0, _coerce_float(toc_font_raw, DEFAULT_BOOK_PRESET["toc_font_size_pt"]))
     line_height = max(0.5, _coerce_float(values.get("line_height"), 1.2))
     column_count = max(8, _coerce_int(values.get("meeting_table_column_count"), 28))
     column_gap_px = max(0, _coerce_int(values.get("meeting_table_column_gap_px"), 6))
@@ -211,6 +234,8 @@ def save_book_layout_preset(preset_id: int | None, values: dict) -> int:
             margin_bottom_in,
             font_family,
             base_font_size_pt,
+            title_font_size_pt,
+            toc_font_size_pt,
             line_height,
             column_count,
             column_gap_px,
@@ -240,6 +265,8 @@ def save_book_layout_preset(preset_id: int | None, values: dict) -> int:
               margin_bottom_in = ?,
               font_family = ?,
               base_font_size_pt = ?,
+              title_font_size_pt = ?,
+              toc_font_size_pt = ?,
               line_height = ?,
               meeting_table_column_count = ?,
               meeting_table_column_gap_px = ?,
@@ -294,6 +321,8 @@ def save_book_layout_preset(preset_id: int | None, values: dict) -> int:
                   margin_bottom_in,
                   font_family,
                   base_font_size_pt,
+                  title_font_size_pt,
+                  toc_font_size_pt,
                   line_height,
                   meeting_table_column_count,
                   meeting_table_column_gap_px,
@@ -308,7 +337,7 @@ def save_book_layout_preset(preset_id: int | None, values: dict) -> int:
                   contacts_highlight_row_color,
                   shared_contacts_group_name,
                   is_default
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 params,
             )

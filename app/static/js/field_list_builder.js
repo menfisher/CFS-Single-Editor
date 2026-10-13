@@ -691,10 +691,9 @@ window.addEventListener("DOMContentLoaded", () => {
     const fontSizePt = Number(settings.baseFontSizePt || 10);
     const fontSizePx = (fontSizePt * 96) / 72;
     const columnWidthPx = getEffectiveColumnWidthIn() * 96;
-    // Match CSS: fixed 16ch phone stack + 1ch gap before the name/address column.
+    // Match CSS: fixed 16ch phone stack (2-letter code + 1 space), then the name.
     const fixedPhoneColumnPx = measureTextWidth("0".repeat(16), "normal");
-    const gridGapPx = measureTextWidth("0", "normal");
-    return Math.max(120, columnWidthPx - fixedPhoneColumnPx - gridGapPx);
+    return Math.max(120, columnWidthPx - fixedPhoneColumnPx);
   };
 
   const textFitsWidth = (text, widthPx, style = "normal") => {
