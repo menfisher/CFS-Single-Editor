@@ -18,6 +18,7 @@ from app.config import UPLOADS_DIR
 from app.services.backup_service import build_contacts_backup_bytes
 from app.services.contact_export_service import build_contacts_csv_bytes, build_contacts_vcard_bytes, build_google_contacts_csv_bytes
 from app.services.preset_service import get_shared_contacts_group_name
+from app.services.meeting_toc_service import list_unlisted_toc_meetings, set_meetings_unlisted_in_toc
 from app.services.contact_service import (
     add_contact_assignment_option,
     build_contact_group_membership,
@@ -32,10 +33,12 @@ from app.services.contact_service import (
     get_contact_filter_options,
     get_contact_row_colors,
     get_pending_photo_change_for_contact,
+    is_assignment_menu_sentinel,
     is_deleted_contact,
     is_moved_contact,
     list_contacts,
     move_contacts,
+    retain_known_state_filters,
     permanently_delete_contact,
     permanently_delete_contacts,
     rename_contact_assignment_option,
@@ -353,26 +356,40 @@ def contacts_list(
     q: str = Query(default=""),
     field: str = Query(default=""),
     meeting: str = Query(default=""),
+    state: list[str] = Query(default=[]),
     google_notice: str = Query(default=""),
     google_sync_changed: str = Query(default=""),
 ):
     try:
         _log_contacts_route("start")
+        _log_contacts_route("loading google sync summary")
+        google_sync = get_google_sync_summary()
+        _log_contacts_route("loading filters")
+        filters = get_contact_filter_options()
+        available_states = filters.get("states") or []
+        available_state_keys = {str(item or "").strip().casefold() for item in available_states if str(item or "").strip()}
+        state_filters = retain_known_state_filters(state, available_states)
         current_list_url = str(request.url.path)
         filtered_query_items = [
             (key, value)
             for key, value in request.query_params.multi_items()
             if key not in {"google_notice", "google_sync_changed"}
+            and not (key == "state" and str(value or "").strip().casefold() not in available_state_keys)
         ]
         if filtered_query_items:
             current_list_url = f"{current_list_url}?{urlencode(filtered_query_items)}"
-        _log_contacts_route("loading google sync summary")
-        google_sync = get_google_sync_summary()
         _log_contacts_route("loading contacts")
-        contacts = list_contacts(q, field, meeting)
+        contacts = list_contacts(q, field, meeting, state_filters)
         _log_contacts_route(f"loaded contacts count={len(contacts)}")
-        filters = get_contact_filter_options()
-        _log_contacts_route("loaded filters")
+        meeting_name = str(meeting or "").strip()
+        meeting_roster_count = 0
+        if (
+            meeting_name
+            and meeting_name.casefold() != "deleted"
+            and not is_assignment_menu_sentinel(meeting_name)
+            and not is_assignment_menu_sentinel(field)
+        ):
+            meeting_roster_count = len(list_contacts("", field, meeting_name))
         row_colors = get_contact_row_colors()
         _log_contacts_route("loaded row colors")
         response = templates.TemplateResponse(
@@ -391,6 +408,9 @@ def contacts_list(
                 "query": q,
                 "field_filter": field,
                 "meeting_filter": meeting,
+                "meeting_roster_count": meeting_roster_count,
+                "unlisted_toc_meetings": list_unlisted_toc_meetings(),
+                "state_filters": state_filters,
             },
             headers={"Cache-Control": "no-store"},
         )
@@ -805,6 +825,27 @@ def contacts_delete_selected(
     if deleted_count <= 0:
         raise HTTPException(status_code=404, detail="No contacts selected")
     return RedirectResponse(url=safe_return_to, status_code=303)
+
+
+@router.post("/meeting-toc-listing")
+async def contacts_meeting_toc_listing(request: Request):
+    if not is_editing_allowed():
+        return JSONResponse({"error": "The app is in NO-EDIT mode."}, status_code=403)
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        return JSONResponse({"error": "Choose a meeting first."}, status_code=400)
+    meetings = payload.get("meetings")
+    if not isinstance(meetings, list) or not meetings:
+        return JSONResponse({"error": "Choose a meeting first."}, status_code=400)
+    unlisted = bool(payload.get("unlisted"))
+    saved = set_meetings_unlisted_in_toc(meetings, unlisted)
+    try:
+        from app.services.google_sync_service import mark_field_list_for_drive_export
+
+        mark_field_list_for_drive_export()
+    except Exception:
+        pass
+    return JSONResponse({"ok": True, "unlisted": unlisted, "meetings": saved})
 
 
 @router.post("/assignment-options")

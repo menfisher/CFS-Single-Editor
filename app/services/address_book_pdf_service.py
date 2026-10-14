@@ -2060,9 +2060,12 @@ def build_address_book_pdf(
     y = page_height - margin_top
     page_number = 1
     content_width = page_width - margin_left - margin_right
+    from app.services.meeting_toc_service import meeting_is_unlisted_in_toc, unlisted_toc_meeting_keys
+
     toc_entries: list[_TocEntry] = []
     index_entries: list[_IndexEntry] = []
     current_toc_entry: _TocEntry | None = None
+    unlisted_toc_meetings = unlisted_toc_meeting_keys()
 
     def tw(text: str, size: float) -> float:
         return _text_width(text, size, font_family)
@@ -2433,10 +2436,14 @@ def build_address_book_pdf(
                 else:
                     y -= line_step * meeting_separator_lines
             ensure_space(4, field_name, heading)
-            current_toc_entry = _TocEntry(field_name=field_name, meeting_heading=heading, page=page_number)
-            toc_entries.append(current_toc_entry)
+            if meeting_is_unlisted_in_toc(field_name, meeting_name, unlisted_toc_meetings):
+                current_toc_entry = None
+            else:
+                current_toc_entry = _TocEntry(field_name=field_name, meeting_heading=heading, page=page_number)
+                toc_entries.append(current_toc_entry)
             heading_line = add_center(heading, font_size + 1, bold=True)
-            current_toc_entry.heading_lines.append(heading_line)
+            if current_toc_entry:
+                current_toc_entry.heading_lines.append(heading_line)
             add_rule()
             for contact in meeting.get("contacts", []):
                 phones = list(contact.get("phones") or [])

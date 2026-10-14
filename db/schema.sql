@@ -338,6 +338,12 @@ ON field_list_templates (name);
 CREATE INDEX IF NOT EXISTS idx_field_list_template_items_template
 ON field_list_template_items (template_id, sort_order, id);
 
+CREATE TABLE IF NOT EXISTS meeting_toc_exclusions (
+  field_name TEXT NOT NULL,
+  meeting_name TEXT NOT NULL,
+  PRIMARY KEY (field_name, meeting_name)
+);
+
 CREATE TABLE IF NOT EXISTS share_recipients (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   display_name TEXT NOT NULL DEFAULT '',

@@ -45,6 +45,10 @@
             <button type="button" class="contacts-action-link" data-contacts-action="email">Email</button>
             <button type="button" class="contacts-action-link" data-contacts-action="delete">Delete</button>
             <button type="button" class="contacts-action-link" data-contacts-action="move">Move</button>
+            <label class="contacts-unlisted-toc" data-unlisted-toc hidden>
+              <input type="checkbox" data-unlisted-toc-checkbox>
+              Unlisted in TOC
+            </label>
             {% set contacts_editing_allowed = not google_sync.state.multi_editor_enabled or google_sync.state.editor_mode == "edit" %}
             {% if contacts_editing_allowed and google_sync.account.status == "connected" %}
               <form
@@ -74,6 +78,29 @@
 
         <form method="get" class="search-bar contacts-search-bar" id="contacts-filter-form">
           <input type="search" name="q" value="{{ query }}" placeholder="Search by family or given name">
+          {% set selected_states = state_filters|default([]) %}
+          {% set selected_state_keys = selected_states|map('lower')|list %}
+          {% set available_states = filters.states|default([]) %}
+          <div class="contacts-state-filter" data-contacts-state-filter>
+            <button type="button" class="contacts-state-filter-trigger" id="contacts-state-filter-trigger" aria-haspopup="listbox" aria-expanded="false">
+              <span class="contacts-state-filter-trigger-label" id="contacts-state-filter-trigger-label">All states</span>
+            </button>
+            <div class="contacts-state-filter-menu" id="contacts-state-filter-menu" hidden role="listbox">
+              <div class="contacts-state-filter-actions">
+                <label class="contacts-state-filter-option">
+                  <input type="checkbox" data-state-all {% if not selected_states %}checked{% endif %}>
+                  <span>All states</span>
+                </label>
+                <button type="button" class="contacts-state-filter-clear" data-state-clear>Clear all</button>
+              </div>
+              {% for item in available_states %}
+                <label class="contacts-state-filter-option">
+                  <input type="checkbox" name="state" value="{{ item }}" {% if not selected_states or item|lower in selected_state_keys %}checked{% endif %}>
+                  <span>{{ item }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </div>
           <select name="field" id="contacts-field-filter">
             <option value="">All fields</option>
             {% if field_filter and field_filter not in filters.fields %}
@@ -213,7 +240,7 @@
             <tr class="click-row click-row-banded contacts-table-row" data-contact-row data-contact-deleted="{{ 'true' if contact_is_deleted else 'false' }}" data-message-contact-name="{{ contact_display_name|forceescape }}" data-message-phones='{{ contact.message_phones|default([])|tojson|forceescape }}' data-message-emails='{{ contact.message_emails|default([])|tojson|forceescape }}' style="--row-band-color: {{ band_color }}; --row-hover-color: {{ row_colors.highlight }};" onclick="window.location='/contacts/{{ contact.id }}?return_to={{ current_list_url|urlencode }}'">
               <td>
                 <div class="contact-name-cell">
-                  <input class="contacts-row-checkbox" type="checkbox" data-contact-select data-contact-id="{{ contact.id }}" aria-label="Select {{ contact.family_name }}, {{ contact.given_name }}" onclick="event.stopPropagation()">
+                  <input class="contacts-row-checkbox" type="checkbox" data-contact-select data-contact-id="{{ contact.id }}" data-contact-fields='{{ contact.fields_text|default("")|tojson|forceescape }}' data-contact-meetings='{{ contact.meetings_text|default("")|tojson|forceescape }}' aria-label="Select {{ contact.family_name }}, {{ contact.given_name }}" onclick="event.stopPropagation()">
                   {% if contact.photo %}
                     <img class="contact-avatar contact-avatar-small" src="{{ contact.photo }}" alt="" loading="lazy" referrerpolicy="no-referrer">
                   {% endif %}
@@ -423,6 +450,17 @@
       const deletedFilterActive = String(selectedMeeting || "").trim().toLowerCase() === "deleted";
       const initialUploadState = {{ google_sync.state|tojson if google_sync is defined else {} }};
       const editingAllowed = !initialUploadState.multi_editor_enabled || initialUploadState.editor_mode === "edit";
+      const meetingRosterCount = {{ meeting_roster_count|default(0)|tojson }};
+      const unlistedTocMeetings = {{ unlisted_toc_meetings|default([])|tojson }};
+      const unlistedTocControl = document.querySelector("[data-unlisted-toc]");
+      const unlistedTocCheckbox = document.querySelector("[data-unlisted-toc-checkbox]");
+      const unlistedTocKeys = new Set(
+        (Array.isArray(unlistedTocMeetings) ? unlistedTocMeetings : []).map((item) => {
+          const fieldName = String(item.field_name || "").trim().toLowerCase();
+          const meetingName = String(item.meeting_name || "").trim().toLowerCase();
+          return `${fieldName}\n${meetingName}`;
+        })
+      );
       const addFieldSentinel = "__add_field__";
       const addMeetingSentinel = "__add_meeting__";
       const deleteFieldSentinel = "__delete_field__";
@@ -515,10 +553,48 @@
         });
       };
 
+      const stateFilterRoot = form.querySelector("[data-contacts-state-filter]");
+      const stateFilterTrigger = document.getElementById("contacts-state-filter-trigger");
+      const stateFilterTriggerLabel = document.getElementById("contacts-state-filter-trigger-label");
+      const stateFilterMenu = document.getElementById("contacts-state-filter-menu");
+
+      const stateCheckboxes = () => Array.from(form.querySelectorAll('input[name="state"]'));
+      const allStatesCheckbox = () => form.querySelector("[data-state-all]");
+
+      const setAllStateBoxes = (checked) => {
+        stateCheckboxes().forEach((checkbox) => {
+          checkbox.checked = checked;
+          checkbox.disabled = false;
+        });
+      };
+
+      const isAllStatesSelected = () => Boolean(allStatesCheckbox()?.checked);
+
+      const updateStateFilterLabel = () => {
+        if (!stateFilterTriggerLabel) return;
+        const selected = stateCheckboxes()
+          .filter((checkbox) => checkbox.checked)
+          .map((checkbox) => checkbox.value)
+          .filter(Boolean);
+        if (isAllStatesSelected() || !selected.length) {
+          stateFilterTriggerLabel.textContent = selected.length || isAllStatesSelected() ? "All states" : "No states";
+          return;
+        }
+        stateFilterTriggerLabel.textContent = selected.join(", ");
+      };
+
+      const resetStateFilter = () => {
+        const allCheckbox = allStatesCheckbox();
+        if (allCheckbox) allCheckbox.checked = true;
+        setAllStateBoxes(true);
+        updateStateFilterLabel();
+      };
+
       const resetDropdownFilters = () => {
         fieldSelect.value = "";
         renderMeetingOptions("");
         meetingSelect.value = "";
+        resetStateFilter();
       };
 
       const clearAllFilters = () => {
@@ -1246,6 +1322,11 @@
         if (searchInput.value.trim()) {
           resetDropdownFilters();
         }
+        if (isAllStatesSelected()) {
+          stateCheckboxes().forEach((checkbox) => {
+            checkbox.disabled = true;
+          });
+        }
       });
 
       clearFiltersButton?.addEventListener("click", () => {
@@ -1264,6 +1345,7 @@
             clearSelectionNotice();
           }
 
+          updateUnlistedTocUi();
           if (!selectionLabel || !selectionTools || !selectionCount) return;
         selectionLabel.hidden = count > 0;
         selectionTools.hidden = count === 0;
@@ -1271,6 +1353,39 @@
           if (count === 0) {
             selectionMenu?.removeAttribute("open");
           }
+        };
+
+        const assignmentMenuSentinel = (value) => [
+          addFieldSentinel,
+          addMeetingSentinel,
+          deleteFieldSentinel,
+          deleteMeetingSentinel,
+          renameFieldSentinel,
+          renameMeetingSentinel,
+        ].includes(String(value || "").trim());
+        const tocPairKey = (fieldName, meetingName) => `${String(fieldName || "").trim().toLowerCase()}\n${String(meetingName || "").trim().toLowerCase()}`;
+        const selectedMeetingTocPairs = () => {
+          const meetingName = String(selectedMeeting || "").trim();
+          const fieldName = String(fieldSelect?.value || "").trim();
+          const searchText = String(searchInput?.value || "").trim();
+          if (!fieldName || !meetingName || meetingName.toLowerCase() === "deleted" || assignmentMenuSentinel(meetingName) || assignmentMenuSentinel(fieldName)) {
+            return [];
+          }
+          if (searchText || meetingRosterCount < 1 || rowCheckboxes.length !== meetingRosterCount) {
+            return [];
+          }
+          if (!rowCheckboxes.every((checkbox) => checkbox.checked)) {
+            return [];
+          }
+          return [{ field: fieldName, meeting: meetingName }];
+        };
+        const updateUnlistedTocUi = () => {
+          if (!unlistedTocControl || !unlistedTocCheckbox) return;
+          const pairs = selectedMeetingTocPairs();
+          unlistedTocControl.hidden = pairs.length === 0;
+          if (!pairs.length) return;
+          unlistedTocCheckbox.disabled = !editingAllowed;
+          unlistedTocCheckbox.checked = pairs.every((pair) => unlistedTocKeys.has(tocPairKey(pair.field, pair.meeting)));
         };
 
       let messageTargets = [];
@@ -1702,6 +1817,38 @@
         checkbox.addEventListener("change", updateSelectionUi);
       });
 
+      unlistedTocCheckbox?.addEventListener("change", async () => {
+        const pairs = selectedMeetingTocPairs();
+        const unlisted = Boolean(unlistedTocCheckbox.checked);
+        if (!pairs.length || !editingAllowed) {
+          updateUnlistedTocUi();
+          return;
+        }
+        unlistedTocCheckbox.disabled = true;
+        try {
+          const response = await fetch("/contacts/meeting-toc-listing", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ unlisted, meetings: pairs }),
+          });
+          if (!response.ok) {
+            throw new Error("The meeting listing could not be saved.");
+          }
+          pairs.forEach((pair) => {
+            const key = tocPairKey(pair.field, pair.meeting);
+            if (unlisted) {
+              unlistedTocKeys.add(key);
+            } else {
+              unlistedTocKeys.delete(key);
+            }
+          });
+        } catch (error) {
+          unlistedTocCheckbox.checked = !unlisted;
+        } finally {
+          unlistedTocCheckbox.disabled = !editingAllowed;
+        }
+      });
+
       selectionClear?.addEventListener("click", () => {
         rowCheckboxes.forEach((checkbox) => {
           checkbox.checked = false;
@@ -1848,6 +1995,79 @@
         bulkMoveForm.requestSubmit();
       });
 
+      const selectedStateSignature = () => {
+        if (isAllStatesSelected()) return "";
+        return stateCheckboxes()
+          .filter((checkbox) => checkbox.checked)
+          .map((checkbox) => checkbox.value)
+          .filter(Boolean)
+          .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }))
+          .join("\n");
+      };
+
+      let stateFilterSignature = selectedStateSignature();
+
+      const closeStateFilterMenu = () => {
+        if (!stateFilterMenu || !stateFilterTrigger) return;
+        const wasOpen = !stateFilterMenu.hidden;
+        stateFilterMenu.hidden = true;
+        stateFilterTrigger.setAttribute("aria-expanded", "false");
+        if (!wasOpen) return;
+        const nextSignature = selectedStateSignature();
+        if (nextSignature === stateFilterSignature) return;
+        stateFilterSignature = nextSignature;
+        form.requestSubmit();
+      };
+
+      const openStateFilterMenu = () => {
+        if (!stateFilterMenu || !stateFilterTrigger) return;
+        stateFilterSignature = selectedStateSignature();
+        stateFilterMenu.hidden = false;
+        stateFilterTrigger.setAttribute("aria-expanded", "true");
+      };
+
+      stateFilterTrigger?.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!stateFilterMenu) return;
+        if (stateFilterMenu.hidden) {
+          openStateFilterMenu();
+        } else {
+          closeStateFilterMenu();
+        }
+      });
+
+      stateFilterMenu?.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const clearButton = event.target.closest("[data-state-clear]");
+        if (!clearButton) return;
+        const allCheckbox = allStatesCheckbox();
+        if (allCheckbox) allCheckbox.checked = false;
+        setAllStateBoxes(false);
+        updateStateFilterLabel();
+      });
+
+      document.addEventListener("click", (event) => {
+        if (!stateFilterRoot) return;
+        if (stateFilterRoot.contains(event.target)) return;
+        closeStateFilterMenu();
+      });
+
+      stateFilterMenu?.addEventListener("change", (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLInputElement) || target.type !== "checkbox") return;
+        const allCheckbox = allStatesCheckbox();
+        const boxes = stateCheckboxes();
+        if (target.hasAttribute("data-state-all")) {
+          if (allCheckbox) allCheckbox.checked = true;
+          setAllStateBoxes(true);
+        } else if (target.name === "state" && allCheckbox) {
+          allCheckbox.checked = boxes.length > 0 && boxes.every((checkbox) => checkbox.checked);
+        }
+        updateStateFilterLabel();
+      });
+
+      updateStateFilterLabel();
       updateSelectionUi();
       fieldSelect.dataset.previousValue = fieldSelect.value;
       meetingSelect.dataset.previousValue = meetingSelect.value;

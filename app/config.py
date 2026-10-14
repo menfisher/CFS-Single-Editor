@@ -17,8 +17,6 @@ SCHEMA_PATH = SCHEMA_DIR / "schema.sql"
 MEETING_V2_SCHEMA_PATH = SCHEMA_DIR / "meeting_layout_v2.sql"
 
 APP_TITLE = "Contacts Website"
-HOST = "127.0.0.1"
-PORT = 8000
 
 # This CFS build supports Single-Editor mode only (no multi-editor choice in Settings).
 SINGLE_EDITOR_ONLY = True
@@ -185,6 +183,9 @@ def _load_dotenv() -> None:
 
 
 _load_dotenv()
+
+HOST = os.getenv("CONTACTSFREESHARE_HOST", "127.0.0.1").strip() or "127.0.0.1"
+PORT = int(os.getenv("CONTACTSFREESHARE_PORT", "8000") or "8000")
 
 # Mobile/share Cloud Run use GOOGLE_CLIENT_*; desktop uses GOOGLE_OAUTH_CLIENT_*.
 # Accept either so token refresh in shared google_sync_service works in all hosts.

@@ -4373,10 +4373,13 @@ def export_field_list_payload() -> dict[str, Any]:
             "items": template.get("items") or [],
         }
     ]
+    from app.services.meeting_toc_service import list_unlisted_toc_meetings
+
     return {
         "format": "contactsfreeshare.field_list.v1",
         "page_width_in": PAGE_WIDTH_IN,
         "page_height_in": PAGE_HEIGHT_IN,
+        "unlisted_toc_meetings": list_unlisted_toc_meetings(),
         "address_book_settings": {
             key: settings[key]
             for key in FIELD_LIST_SHARED_SETTING_KEYS
@@ -4490,5 +4493,10 @@ def import_field_list_payload(payload: object) -> bool:
                     ),
                 )
         conn.commit()
+    if "unlisted_toc_meetings" in payload:
+        from app.services.meeting_toc_service import replace_unlisted_toc_meetings
+
+        raw_meetings = payload.get("unlisted_toc_meetings")
+        replace_unlisted_toc_meetings(raw_meetings if isinstance(raw_meetings, list) else [])
     ensure_default_field_list_template()
     return True

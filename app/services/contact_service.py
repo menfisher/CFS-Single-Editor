@@ -34,6 +34,18 @@ EDIT_LOG_DISPLAY_TIMEZONE = ZoneInfo("America/Chicago")
 EDIT_LOG_RETENTION_MONTHS = 6
 LOCAL_CONTACT_PHOTO_PREFIX = "/static/uploads/contact_photos/"
 LEGACY_SHARED_GROUP_NAME = "TriState Separates (Shared)"
+ASSIGNMENT_MENU_SENTINELS = {
+    "__add_field__",
+    "__add_meeting__",
+    "__delete_field__",
+    "__delete_meeting__",
+    "__rename_field__",
+    "__rename_meeting__",
+}
+
+
+def is_assignment_menu_sentinel(value: object) -> bool:
+    return str(value or "").strip() in ASSIGNMENT_MENU_SENTINELS
 
 
 def _log_contact_service(message: str) -> None:
@@ -523,6 +535,9 @@ def rename_contact_assignment_option(kind: str, old_value: str, new_value: str) 
                 """,
                 (normalized_new_value, normalized_old_value),
             )
+        from app.services.meeting_toc_service import rename_unlisted_toc_assignment
+
+        rename_unlisted_toc_assignment(normalized_kind, normalized_old_value, normalized_new_value, conn)
         removed_meetingdata_sections = _delete_empty_meetingdata_sections_for_assignment_option(
             conn,
             normalized_kind,
@@ -558,6 +573,87 @@ def rename_contact_assignment_option(kind: str, old_value: str, new_value: str) 
         "removed_meetingdata_sections": removed_meetingdata_sections,
         "renamed_meetingdata_sections": renamed_meetingdata_sections,
     }
+
+
+def normalize_state_filters(values: list[str] | str | None) -> list[str]:
+    if values is None:
+        items: list[str] = []
+    elif isinstance(values, str):
+        items = [values]
+    else:
+        items = list(values)
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for item in items:
+        for part in str(item or "").replace(";", ",").split(","):
+            cleaned = _clean_text(part)
+            key = cleaned.casefold()
+            if not cleaned or key in seen:
+                continue
+            seen.add(key)
+            normalized.append(cleaned)
+    return normalized
+
+
+def retain_known_state_filters(requested, available: list[str] | None) -> list[str]:
+    """Drop state filter values that are no longer used on any contact."""
+    known = {item.casefold() for item in (available or []) if str(item or "").strip()}
+    return [item for item in normalize_state_filters(requested) if item.casefold() in known]
+
+
+def list_contact_states() -> list[str]:
+    rows = fetch_all(
+        """
+        SELECT DISTINCT TRIM(region) AS state
+        FROM addresses
+        WHERE TRIM(COALESCE(region, '')) != ''
+        """
+    )
+    states = [_clean_text(row["state"]) for row in rows if _clean_text(row.get("state"))]
+    return sorted(states, key=str.casefold)
+
+
+def contact_matches_state_filters(
+    meets_in_state: str | None,
+    address_regions: list[str] | None,
+    state_filters: list[str] | str | None,
+) -> bool:
+    selected = {item.casefold() for item in normalize_state_filters(state_filters)}
+    if not selected:
+        return True
+    override = _clean_text(meets_in_state)
+    if override:
+        return override.casefold() in selected
+    return any(_clean_text(region).casefold() in selected for region in (address_regions or []))
+
+
+def _filter_contacts_by_states(contacts: list[dict], state_filters: list[str] | str | None) -> list[dict]:
+    selected = normalize_state_filters(state_filters)
+    if not selected or not contacts:
+        return contacts
+    contact_ids = [int(contact["id"]) for contact in contacts]
+    placeholders = ",".join("?" for _ in contact_ids)
+    rows = fetch_all(
+        f"""
+        SELECT contact_id, region
+        FROM addresses
+        WHERE contact_id IN ({placeholders})
+          AND TRIM(COALESCE(region, '')) != ''
+        """,
+        tuple(contact_ids),
+    )
+    regions_by_contact: dict[int, list[str]] = {}
+    for row in rows:
+        regions_by_contact.setdefault(int(row["contact_id"]), []).append(str(row["region"] or ""))
+    return [
+        contact
+        for contact in contacts
+        if contact_matches_state_filters(
+            contact.get("meets_in_state"),
+            regions_by_contact.get(int(contact["id"]), []),
+            selected,
+        )
+    ]
 
 
 def get_contact_filter_options() -> dict:
@@ -637,6 +733,7 @@ def get_contact_filter_options() -> dict:
         "fields": fields,
         "meetings": meetings,
         "meetings_by_field": meetings_by_field,
+        "states": list_contact_states(),
     }
 
 
@@ -682,11 +779,17 @@ def get_contact_row_colors() -> dict:
     }
 
 
-def list_contacts(search_text: str = "", field_filter: str = "", meeting_filter: str = "") -> list[dict]:
+def list_contacts(
+    search_text: str = "",
+    field_filter: str = "",
+    meeting_filter: str = "",
+    state_filters: list[str] | str | None = None,
+) -> list[dict]:
     try:
         search_text = (search_text or "").strip()
         field_filter = (field_filter or "").strip()
         meeting_filter = (meeting_filter or "").strip()
+        selected_states = normalize_state_filters(state_filters)
         like = f"%{search_text}%"
         field_like = f"%{field_filter}%"
         meeting_like = f"%{meeting_filter}%"
@@ -830,6 +933,9 @@ def list_contacts(search_text: str = "", field_filter: str = "", meeting_filter:
                 for item in contact_address_rows
                 if str(item.get("formatted_address") or "").strip()
             )
+
+        if selected_states:
+            normalized = _filter_contacts_by_states(normalized, selected_states)
 
         _log_contact_service("list_contacts complete")
         return normalized
