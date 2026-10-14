@@ -762,28 +762,41 @@
 .address-book-pdf-order-modal {
   width: min(760px, calc(100vw - 28px));
   max-width: calc(100vw - 28px);
-  overflow: visible;
+  max-height: calc(100dvh - 24px);
+  margin: auto;
+  overflow: hidden;
 }
 
 .address-book-pdf-order-panel {
   width: auto;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 24px);
+  min-height: 0;
+  overflow: hidden;
 }
 
 .address-book-pdf-order-panel .app-modal-title {
   font-size: 1.2rem;
+  flex: 0 0 auto;
 }
 
 .address-book-pdf-order-list {
   display: grid;
   grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 12px;
-  max-height: min(68vh, 640px);
+  flex: 1 1 auto;
+  height: min(68vh, 640px);
+  max-height: min(68vh, 640px, calc(100dvh - 180px));
+  min-height: 0;
   overflow: hidden;
 }
 
 .address-book-pdf-order-panel .app-modal-actions {
   margin-top: 18px;
+  flex: 0 0 auto;
 }
 
 .address-book-pdf-order-column {
@@ -794,8 +807,11 @@
   border: 1px solid rgba(31, 52, 55, 0.16);
   border-radius: 8px;
   background: #f8f6f1;
-  min-height: 360px;
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
   min-width: 0;
+  overflow: hidden;
 }
 
 .address-book-pdf-order-column h4 {
@@ -808,8 +824,12 @@
   display: grid;
   align-content: start;
   gap: 6px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
   min-height: 0;
+  max-height: 100%;
 }
 
 .address-book-pdf-sortable-item {

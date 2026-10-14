@@ -1593,22 +1593,26 @@ function installAddressBookPdfPrintOrderModal(form) {
   const selectedField = () => orderState.find((field) => field.name === selectedFieldName) || orderState[0] || null;
 
   const renderFields = () => {
+    const scrollTop = fieldsList.scrollTop;
     fieldsList.innerHTML = orderState.map((field) => `
       <button type="button" class="address-book-pdf-sortable-item ${field.name === selectedFieldName ? "is-selected" : ""}" draggable="true" data-order-field-name="${escapeAddressBookPdfHtml(field.name)}">
         ${dragHandle}<span>${escapeAddressBookPdfHtml(field.name || "Field")}</span>
       </button>
     `).join("");
+    fieldsList.scrollTop = scrollTop;
   };
 
   const renderMeetings = () => {
     const field = selectedField();
     selectedFieldName = field?.name || "";
     meetingTitle.textContent = selectedFieldName ? `Meetings in ${selectedFieldName}` : "Meetings";
+    const scrollTop = meetingsList.scrollTop;
     meetingsList.innerHTML = (field?.meetings || []).map((meeting) => `
       <button type="button" class="address-book-pdf-sortable-item" draggable="true" data-order-meeting-name="${escapeAddressBookPdfHtml(meeting.name)}">
         ${dragHandle}<span>${escapeAddressBookPdfHtml(meeting.name || "Meeting")}</span>
       </button>
     `).join("");
+    meetingsList.scrollTop = scrollTop;
   };
 
   const render = () => {
@@ -1627,6 +1631,16 @@ function installAddressBookPdfPrintOrderModal(form) {
     return true;
   };
 
+  const scrollListWhileDragging = (container, clientY) => {
+    const rect = container.getBoundingClientRect();
+    const edge = 44;
+    if (clientY <= rect.top + edge) {
+      container.scrollTop -= Math.max(10, Math.round((rect.top + edge - clientY) * 0.7));
+    } else if (clientY >= rect.bottom - edge) {
+      container.scrollTop += Math.max(10, Math.round((clientY - (rect.bottom - edge)) * 0.7));
+    }
+  };
+
   const bindSortableList = (container, selector, getItems, afterMove) => {
     let draggedKey = "";
     container.addEventListener("dragstart", (event) => {
@@ -1642,8 +1656,10 @@ function installAddressBookPdfPrintOrderModal(form) {
     });
     container.addEventListener("dragover", (event) => {
       event.preventDefault();
+      if (!draggedKey) return;
+      scrollListWhileDragging(container, event.clientY);
       const overItem = event.target.closest(selector);
-      if (!overItem || !draggedKey) return;
+      if (!overItem) return;
       const items = getItems();
       const overKey = overItem.dataset.orderFieldName || overItem.dataset.orderMeetingName || "";
       const fromIndex = items.findIndex((item) => item.name === draggedKey);
@@ -1651,6 +1667,10 @@ function installAddressBookPdfPrintOrderModal(form) {
       if (moveItem(items, fromIndex, toIndex)) {
         collect();
         afterMove();
+        scrollListWhileDragging(container, event.clientY);
+        Array.from(container.querySelectorAll(selector)).find((item) => (
+          (item.dataset.orderFieldName || item.dataset.orderMeetingName || "") === draggedKey
+        ))?.classList.add("is-dragging");
       }
     });
   };
