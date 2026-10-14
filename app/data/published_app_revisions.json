@@ -2,8 +2,13 @@
   "format": "contactsfreeshare.published_revisions.v1",
   "revisions": [
     {
-      "version": "1.241.3",
+      "version": "1.241.4",
+      "date_display": "10/14/2026",
+      "description": "Let the user-defined print order meetings list scroll so long lists can be dragged into place."
+    },
+    {
       "date_display": "10/13/2026",
+      "version": "1.241.3",
       "description": "Restore the Contacts All States dropdown and the Unlisted in TOC checkbox."
     },
     {
