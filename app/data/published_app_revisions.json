@@ -2,8 +2,13 @@
   "format": "contactsfreeshare.published_revisions.v1",
   "revisions": [
     {
-      "version": "1.241.2",
+      "version": "1.241.3",
+      "date_display": "10/13/2026",
+      "description": "Restore the Contacts All States dropdown and the Unlisted in TOC checkbox."
+    },
+    {
       "date_display": "10/12/2026",
+      "version": "1.241.2",
       "description": "Tighten the phone-letter gap in Verdana. Title and TOC font sizes can be set on the Address Book page, and the book title is centered."
     },
     {
